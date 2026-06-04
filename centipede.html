@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Centipede</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #050805;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+      color: #0f0;
+    }
+    #hud {
+      display: flex;
+      justify-content: space-between;
+      width: 600px;
+      padding: 6px 2px;
+      font-size: 15px;
+      letter-spacing: 1px;
+    }
+    canvas { display: block; border: 2px solid #1a3a1a; }
+    #controls {
+      width: 600px;
+      padding: 6px 2px;
+      font-size: 11px;
+      color: #3a5a3a;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <span>SCORE <span id="sv">0</span></span>
+    <span>LEVEL <span id="lv">1</span></span>
+    <span>HI <span id="hv">0</span></span>
+    <span>LIVES <span id="liv">♥♥♥</span></span>
+  </div>
+  <canvas id="c" width="600" height="600"></canvas>
+  <div id="controls">
+    Arrow Keys / WASD — Move &nbsp;|&nbsp; Space — Fire &nbsp;|&nbsp; P — Pause
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx    = canvas.getContext('2d');
+
+  const CELL  = 20;
+  const COLS  = 30;
+  const ROWS  = 30;
+  const PZONE = 25;          // player lives in rows 25-29
+  const BASE_MS = 110;       // ms per centipede step at level 1
+
+  // ── State ──────────────────────────────────────────────────
+  let state;                 // 'title' | 'playing' | 'dead' | 'gameover' | 'paused'
+  let score, hiScore, lives, level;
+  let mushrooms;             // Uint8Array[ROWS][COLS], values 0-4
+  let trains;                // [{segs:[{col,row}], dir:±1, prev:[{col,row}]}]
+  let player;                // {x, y}  px
+  let bullets;               // [{x, y}]
+  let sparks;                // [{x,y,vx,vy,color,life}]
+  let tickMs, tickTimer, shootCd;
+  let prevTs = 0;
+
+  hiScore = 0;
+  state   = 'title';
+
+  // ── Input ──────────────────────────────────────────────────
+  const K = {};
+  window.addEventListener('keydown', e => {
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
+      e.preventDefault();
+    K[e.code] = true;
+
+    if (e.code === 'KeyP') {
+      if (state === 'playing') { state = 'paused'; return; }
+      if (state === 'paused')  { state = 'playing'; prevTs = performance.now(); return; }
+    }
+    if (e.code === 'Space') {
+      if (state === 'title' || state === 'gameover') { startGame(); return; }
+      if (state === 'dead') { resumeRound(); return; }
+    }
+  });
+  window.addEventListener('keyup', e => delete K[e.code]);
+
+  // ── Game setup ─────────────────────────────────────────────
+  function startGame() {
+    score = 0; lives = 3; level = 1; tickMs = BASE_MS;
+    newRound();
+    state = 'playing';
+  }
+
+  function resumeRound() {
+    newRound();
+    state = 'playing';
+    prevTs = performance.now();
+  }
+
+  function newRound() {
+    mushrooms = buildMushrooms();
+    trains    = [buildTrain(12, 1)];
+    player    = { x: 15 * CELL, y: (ROWS - 2) * CELL + CELL / 2 };
+    bullets   = [];
+    sparks    = [];
+    tickTimer = 0;
+    shootCd   = 0;
+  }
+
+  function advanceLevel() {
+    level++;
+    score += 1000;
+    tickMs = Math.max(38, BASE_MS - (level - 1) * 7);
+    mushrooms = buildMushrooms();
+    trains    = [buildTrain(Math.min(20, 11 + level), 1)];
+    player    = { x: 15 * CELL, y: (ROWS - 2) * CELL + CELL / 2 };
+    bullets   = [];
+    sparks    = [];
+    tickTimer = 0;
+  }
+
+  function buildMushrooms() {
+    const m = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
+    for (let r = 1; r < PZONE; r++)
+      for (let c = 0; c < COLS; c++)
+        if (Math.random() < 0.1) m[r][c] = 4;
+    return m;
+  }
+
+  function buildTrain(len, dir) {
+    const segs = Array.from({ length: len }, (_, i) => ({ col: i, row: 0 }));
+    return { segs, dir, prev: segs.map(s => ({ ...s })) };
+  }
+
+  // ── Update ─────────────────────────────────────────────────
+  const PSPD    = 260;   // player px/s
+  const BSPD    = 680;   // bullet px/s
+  const SHOOT_CD = 0.22; // s between shots
+
+  function update(dt) {
+    shootCd = Math.max(0, shootCd - dt);
+
+    // Player movement
+    if (K.ArrowLeft  || K.KeyA) player.x -= PSPD * dt;
+    if (K.ArrowRight || K.KeyD) player.x += PSPD * dt;
+    if (K.ArrowUp    || K.KeyW) player.y -= PSPD * dt;
+    if (K.ArrowDown  || K.KeyS) player.y += PSPD * dt;
+    player.x = clamp(player.x, CELL / 2, COLS * CELL - CELL / 2);
+    player.y = clamp(player.y, PZONE * CELL + CELL / 2, ROWS * CELL - CELL / 2);
+
+    // Shoot
+    if (K.Space && shootCd === 0) {
+      bullets.push({ x: player.x, y: player.y - CELL });
+      shootCd = SHOOT_CD;
+    }
+
+    // Move bullets
+    for (const b of bullets) b.y -= BSPD * dt;
+    bullets = bullets.filter(b => b.y > 0);
+
+    // Bullet vs mushroom
+    bullets = bullets.filter(b => {
+      const c = Math.floor(b.x / CELL), r = Math.floor(b.y / CELL);
+      if (r >= 0 && r < ROWS && c >= 0 && c < COLS && mushrooms[r][c] > 0) {
+        if (--mushrooms[r][c] === 0) score += 5;
+        addSparks(c * CELL + CELL / 2, r * CELL + CELL / 2, 4, '#2a8');
+        return false;
+      }
+      return true;
+    });
+
+    // Bullet vs centipede
+    outer:
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      const b  = bullets[bi];
+      const bc = Math.floor(b.x / CELL), br = Math.floor(b.y / CELL);
+      for (let ti = 0; ti < trains.length; ti++) {
+        const train = trains[ti];
+        const si = train.segs.findIndex(s => s.col === bc && s.row === br);
+        if (si === -1) continue;
+
+        score += si === 0 ? 100 : 10;
+        if (score > hiScore) hiScore = score;
+
+        const hit = train.segs[si];
+        if (hit.row < ROWS) mushrooms[hit.row][hit.col] = 4;
+        addSparks(hit.col * CELL + CELL / 2, hit.row * CELL + CELL / 2, 8, '#f80');
+
+        const front = train.segs.slice(0, si);
+        const back  = train.segs.slice(si + 1);
+        trains.splice(ti, 1);
+        if (front.length) trains.push({ segs: front, dir:  train.dir, prev: front.map(s => ({ ...s })) });
+        if (back.length)  trains.push({ segs: back,  dir: -train.dir, prev: back.map(s => ({ ...s })) });
+
+        bullets.splice(bi, 1);
+        break outer;
+      }
+    }
+
+    // Level clear
+    trains = trains.filter(t => t.segs.length > 0);
+    if (trains.length === 0) { advanceLevel(); return; }
+
+    // Centipede ticks
+    tickTimer += dt * 1000;
+    while (tickTimer >= tickMs) {
+      tickTimer -= tickMs;
+      for (const t of trains) {
+        t.prev = t.segs.map(s => ({ ...s }));
+        stepTrain(t);
+      }
+    }
+
+    // Centipede vs player
+    const lerp = clamp(tickTimer / tickMs, 0, 1);
+    for (const train of trains) {
+      for (let i = 0; i < train.segs.length; i++) {
+        const s = train.segs[i], p = train.prev[i] || s;
+        const sx = lv(p.col, s.col, lerp) * CELL + CELL / 2;
+        const sy = lv(p.row, s.row, lerp) * CELL + CELL / 2;
+        if (Math.hypot(player.x - sx, player.y - sy) < CELL * 0.78) {
+          addSparks(player.x, player.y, 14, '#0f0');
+          lives--;
+          if (score > hiScore) hiScore = score;
+          state = lives > 0 ? 'dead' : 'gameover';
+          updateHUD(); return;
+        }
+      }
+    }
+
+    // Sparks
+    sparks.forEach(s => { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
+    sparks = sparks.filter(s => s.life > 0);
+
+    updateHUD();
+  }
+
+  function stepTrain(t) {
+    const head = t.segs[0];
+    const nc   = head.col + t.dir;
+    const wall = nc < 0 || nc >= COLS;
+    const mush = !wall && mushrooms[head.row][nc] > 0;
+
+    // Shift body
+    for (let i = t.segs.length - 1; i >= 1; i--) t.segs[i] = { ...t.segs[i - 1] };
+
+    if (wall || mush) {
+      const nr = head.row + 1;
+      t.segs[0] = { col: head.col, row: nr >= ROWS ? 0 : nr };
+      t.dir *= -1;
+    } else {
+      t.segs[0] = { col: nc, row: head.row };
+    }
+  }
+
+  function addSparks(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = 60 + Math.random() * 130;
+      sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.28 + Math.random() * 0.2 });
+    }
+  }
+
+  function updateHUD() {
+    document.getElementById('sv').textContent  = score;
+    document.getElementById('lv').textContent  = level;
+    document.getElementById('hv').textContent  = hiScore;
+    document.getElementById('liv').textContent = '♥'.repeat(Math.max(0, lives)) || '—';
+  }
+
+  // ── Draw ───────────────────────────────────────────────────
+  function lv(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  const MUSH_CLR = [null, '#174017', '#245c24', '#318031', '#3ea43e'];
+
+  function draw() {
+    ctx.fillStyle = '#060a06';
+    ctx.fillRect(0, 0, 600, 600);
+
+    // Player zone divider
+    ctx.strokeStyle = '#102010';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(0, PZONE * CELL); ctx.lineTo(600, PZONE * CELL); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Mushrooms
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const h = mushrooms[r][c];
+        if (!h) continue;
+        const mx = c * CELL + CELL / 2, my = r * CELL + CELL / 2;
+        ctx.fillStyle = MUSH_CLR[h];
+        ctx.beginPath(); ctx.arc(mx, my, CELL / 2 - 3, 0, Math.PI * 2); ctx.fill();
+        // Damage lines
+        if (h < 4) {
+          ctx.strokeStyle = '#060a06';
+          ctx.lineWidth = 1.5;
+          for (let d = 0; d < 4 - h; d++) {
+            ctx.beginPath();
+            ctx.moveTo(mx - 4 + d * 3, my - 3);
+            ctx.lineTo(mx - 2 + d * 3, my + 3);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Centipede
+    const lerp = clamp(tickTimer / tickMs, 0, 1);
+    for (const train of (trains || [])) {
+      for (let i = train.segs.length - 1; i >= 0; i--) {
+        const s = train.segs[i], p = train.prev[i] || s;
+        const x = lv(p.col, s.col, lerp) * CELL + CELL / 2;
+        const y = lv(p.row, s.row, lerp) * CELL + CELL / 2;
+        const r = CELL / 2 - 2;
+        ctx.fillStyle = i === 0 ? '#d94' : '#b73';
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = i === 0 ? '#a63' : '#823';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, y, r - 2, 0, Math.PI * 2); ctx.stroke();
+        // Eyes on head
+        if (i === 0) {
+          ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(x - 3, y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(x + 3, y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#111';
+          ctx.beginPath(); ctx.arc(x - 2.5, y - 2, 1.2, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(x + 3.5, y - 2, 1.2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+
+    // Bullets
+    ctx.fillStyle = '#ff0';
+    for (const b of (bullets || [])) ctx.fillRect(b.x - 1.5, b.y - 7, 3, 10);
+
+    // Player
+    if (state === 'playing' || state === 'paused' || state === 'dead') {
+      const px = player.x, py = player.y;
+      ctx.fillStyle = '#0f0';
+      ctx.beginPath();
+      ctx.moveTo(px, py - CELL / 2);
+      ctx.lineTo(px + CELL / 2 - 1, py + CELL / 2 - 1);
+      ctx.lineTo(px - CELL / 2 + 1, py + CELL / 2 - 1);
+      ctx.closePath(); ctx.fill();
+      // Barrel
+      ctx.fillStyle = '#0c0';
+      ctx.fillRect(px - 2, py - CELL / 2 - 5, 4, 7);
+    }
+
+    // Sparks
+    for (const s of (sparks || [])) {
+      ctx.globalAlpha = clamp(s.life * 4, 0, 1);
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Overlays ──────────────────────────────────────────────
+    if (state === 'title') {
+      darkOverlay(0.65);
+      centeredText('CENTIPEDE', 'bold 54px "Courier New"', '#0f0', 210);
+      centeredText('PRESS SPACE TO START', '17px "Courier New"', '#8a8', 270);
+      centeredText('ARROW KEYS / WASD  ·  SPACE TO FIRE  ·  P PAUSE', '13px "Courier New"', '#3a5a3a', 310);
+    }
+    if (state === 'gameover') {
+      darkOverlay(0.7);
+      centeredText('GAME OVER', 'bold 52px "Courier New"', '#e33', 215);
+      centeredText(`SCORE  ${score}`, '20px "Courier New"', '#0f0', 272);
+      centeredText(`HI SCORE  ${hiScore}`, '16px "Courier New"', '#6a6', 305);
+      centeredText('PRESS SPACE TO PLAY AGAIN', '16px "Courier New"', '#7a7', 345);
+    }
+    if (state === 'dead') {
+      darkOverlay(0.45);
+      centeredText('YOU DIED', 'bold 44px "Courier New"', '#f80', 220);
+      centeredText(`LIVES REMAINING  ${'♥'.repeat(lives)}`, '18px "Courier New"', '#0f0', 278);
+      centeredText('PRESS SPACE TO CONTINUE', '15px "Courier New"', '#7a7', 315);
+    }
+    if (state === 'paused') {
+      darkOverlay(0.5);
+      centeredText('PAUSED', 'bold 48px "Courier New"', '#ff0', 250);
+      centeredText('P  TO RESUME', '17px "Courier New"', '#aa0', 305);
+    }
+  }
+
+  function darkOverlay(a) {
+    ctx.fillStyle = `rgba(0,0,0,${a})`;
+    ctx.fillRect(0, 0, 600, 600);
+  }
+  function centeredText(txt, font, color, y) {
+    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = 'center';
+    ctx.fillText(txt, 300, y);
+  }
+
+  // ── Main loop ──────────────────────────────────────────────
+  function frame(ts) {
+    const dt = Math.min((ts - prevTs) / 1000, 0.05);
+    prevTs = ts;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  updateHUD();
+  draw();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
