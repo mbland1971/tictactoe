@@ -6,228 +6,330 @@
   <title>Tic Tac Toe</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       background: #1a1a2e;
       font-family: 'Segoe UI', sans-serif;
       color: #eee;
     }
+    .container { display: flex; flex-direction: column; align-items: center; gap: 20px; }
 
-    .container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 24px;
+    h1 { font-size: 2.2rem; letter-spacing: 4px; text-transform: uppercase; color: #e0e0ff; }
+
+    .mode-toggle {
+      display: flex; border-radius: 8px; overflow: hidden; border: 1px solid #0f3460;
     }
-
-    h1 {
-      font-size: 2.2rem;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      color: #e0e0ff;
+    .mode-btn {
+      padding: 7px 20px; border: none; cursor: pointer;
+      font-size: 0.85rem; letter-spacing: 1px;
+      background: #16213e; color: #667788;
+      transition: background 0.2s, color 0.2s;
     }
+    .mode-btn.active { background: #0f3460; color: #e0e0ff; }
 
-    .scoreboard {
-      display: flex;
-      gap: 32px;
-      font-size: 1rem;
-      color: #aaa;
+    .scoreboard { display: flex; gap: 28px; font-size: 1rem; color: #aaa; }
+    .score-item {
+      text-align: center; padding: 6px 16px; border-radius: 8px;
+      transition: background 0.2s, box-shadow 0.2s;
     }
-
-    .score-item { text-align: center; }
-    .score-item span {
-      display: block;
-      font-size: 2rem;
-      font-weight: bold;
-      color: #fff;
-    }
-
+    .score-item span { display: block; font-size: 2rem; font-weight: bold; color: #fff; }
     .score-x span { color: #ff6b6b; }
     .score-o span { color: #4ecdc4; }
+    .score-item.active-turn { background: #16213e; box-shadow: 0 0 0 1px #0f3460; }
 
     .status {
-      font-size: 1.2rem;
-      min-height: 1.6rem;
-      color: #ccc;
-      transition: color 0.2s;
+      font-size: 1.2rem; min-height: 1.8rem; color: #ccc; transition: color 0.2s;
     }
-
     .status.x { color: #ff6b6b; }
     .status.o { color: #4ecdc4; }
     .status.win { font-weight: bold; font-size: 1.4rem; }
 
+    .board-wrap { position: relative; }
     .board {
       display: grid;
       grid-template-columns: repeat(3, 110px);
       grid-template-rows: repeat(3, 110px);
       gap: 8px;
     }
-
     .cell {
-      background: #16213e;
-      border-radius: 12px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 3.2rem;
-      font-weight: bold;
-      transition: background 0.15s, transform 0.1s;
+      background: #16213e; border-radius: 12px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3.2rem; font-weight: bold;
+      transition: background 0.15s;
       user-select: none;
     }
-
-    .cell:hover:not(.taken) {
-      background: #0f3460;
-      transform: scale(1.04);
-    }
-
+    .cell:hover:not(.taken) { background: #0f3460; }
     .cell.x { color: #ff6b6b; }
     .cell.o { color: #4ecdc4; }
-
-    .cell.winning {
-      background: #0f3460;
-      box-shadow: 0 0 18px rgba(255, 255, 255, 0.2);
-      animation: pulse 0.6s ease-in-out;
+    .cell .mark { display: block; }
+    .cell.just-placed .mark { animation: pop 0.2s ease-out; }
+    @keyframes pop {
+      from { transform: scale(0.15); opacity: 0.5; }
+      to   { transform: scale(1);    opacity: 1; }
     }
+    .cell.winning { background: #0f3460; box-shadow: 0 0 16px rgba(255,255,255,0.12); }
 
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.08); }
+    /* SVG win line overlay — matches the 346×346 board */
+    .win-svg {
+      position: absolute; top: 0; left: 0;
+      width: 346px; height: 346px;
+      pointer-events: none;
     }
+    .win-svg line {
+      stroke: rgba(255,255,255,0.5);
+      stroke-width: 5; stroke-linecap: round;
+      stroke-dasharray: 600; stroke-dashoffset: 600;
+    }
+    .win-svg.show line { animation: drawLine 0.38s ease-out forwards; }
+    @keyframes drawLine { to { stroke-dashoffset: 0; } }
 
+    .buttons { display: flex; gap: 12px; }
     .btn {
-      padding: 10px 28px;
-      border: none;
-      border-radius: 8px;
-      background: #0f3460;
-      color: #e0e0ff;
-      font-size: 1rem;
-      cursor: pointer;
-      letter-spacing: 1px;
+      padding: 10px 28px; border: none; border-radius: 8px;
+      background: #0f3460; color: #e0e0ff;
+      font-size: 1rem; cursor: pointer; letter-spacing: 1px;
       transition: background 0.2s, transform 0.1s;
     }
-
     .btn:hover { background: #1a4a80; transform: translateY(-1px); }
     .btn:active { transform: translateY(0); }
+
+    .hint { font-size: 0.72rem; color: #445566; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Tic Tac Toe</h1>
+<div class="container">
+  <h1>Tic Tac Toe</h1>
 
-    <div class="scoreboard">
-      <div class="score-item score-x">
-        <span id="score-x">0</span>
-        Player X
-      </div>
-      <div class="score-item">
-        <span id="score-draw">0</span>
-        Draws
-      </div>
-      <div class="score-item score-o">
-        <span id="score-o">0</span>
-        Player O
-      </div>
-    </div>
-
-    <div class="status" id="status">Player X's turn</div>
-
-    <div class="board" id="board">
-      <div class="cell" data-i="0"></div>
-      <div class="cell" data-i="1"></div>
-      <div class="cell" data-i="2"></div>
-      <div class="cell" data-i="3"></div>
-      <div class="cell" data-i="4"></div>
-      <div class="cell" data-i="5"></div>
-      <div class="cell" data-i="6"></div>
-      <div class="cell" data-i="7"></div>
-      <div class="cell" data-i="8"></div>
-    </div>
-
-    <button class="btn" id="restart">New Game</button>
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="btn-2p">2 Players</button>
+    <button class="mode-btn"        id="btn-ai">vs Computer</button>
   </div>
 
-  <script>
-    const WINS = [
-      [0,1,2],[3,4,5],[6,7,8],
-      [0,3,6],[1,4,7],[2,5,8],
-      [0,4,8],[2,4,6]
-    ];
+  <div class="scoreboard">
+    <div class="score-item score-x" id="si-x">
+      <span id="score-x">0</span>
+      Player X
+    </div>
+    <div class="score-item">
+      <span id="score-draw">0</span>
+      Draws
+    </div>
+    <div class="score-item score-o" id="si-o">
+      <span id="score-o">0</span>
+      <span id="label-o">Player O</span>
+    </div>
+  </div>
 
-    let board, current, gameOver, scores;
+  <div class="status" id="status">Player X's turn</div>
 
-    function init() {
-      board = Array(9).fill(null);
-      current = 'X';
-      gameOver = false;
-      if (!scores) scores = { X: 0, O: 0, draw: 0 };
-      render();
+  <div class="board-wrap">
+    <div class="board" id="board">
+      <div class="cell" data-i="0"></div><div class="cell" data-i="1"></div><div class="cell" data-i="2"></div>
+      <div class="cell" data-i="3"></div><div class="cell" data-i="4"></div><div class="cell" data-i="5"></div>
+      <div class="cell" data-i="6"></div><div class="cell" data-i="7"></div><div class="cell" data-i="8"></div>
+    </div>
+    <svg class="win-svg" id="win-svg" viewBox="0 0 346 346">
+      <line id="win-line" x1="0" y1="0" x2="0" y2="0"/>
+    </svg>
+  </div>
+
+  <div class="buttons">
+    <button class="btn" id="restart">New Game</button>
+  </div>
+  <div class="hint">Keys 7–9 / 4–6 / 1–3 match the numpad layout</div>
+</div>
+
+<script>
+  // Win pattern index → [x1,y1, x2,y2] in the 346×346 SVG
+  // Cell centers: col*118+55, row*118+55  (110px cells, 8px gaps)
+  const WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  const WIN_LINES = [
+    [20,55, 326,55],  [20,173,326,173], [20,291,326,291],
+    [55,20, 55,326],  [173,20,173,326], [291,20,291,326],
+    [20,20, 326,326], [326,20, 20,326],
+  ];
+  // Numpad layout: 7=cell0, 8=cell1, 9=cell2, 4=cell3, ...
+  const KEY_MAP = {'7':0,'8':1,'9':2,'4':3,'5':4,'6':5,'1':6,'2':7,'3':8};
+
+  let board, current, gameOver, scores, mode, aiThinking, nextFirst;
+  mode = '2p'; nextFirst = 'X';
+
+  // ── Init ─────────────────────────────────────────────────
+  function init() {
+    board = Array(9).fill(null);
+    current = nextFirst;
+    gameOver = false; aiThinking = false;
+    if (!scores) scores = {X:0, O:0, draw:0};
+
+    const svg = document.getElementById('win-svg');
+    svg.classList.remove('show');
+    const ln = document.getElementById('win-line');
+    ln.setAttribute('x1',0); ln.setAttribute('y1',0);
+    ln.setAttribute('x2',0); ln.setAttribute('y2',0);
+
+    render();
+
+    if (mode === 'ai' && current === 'O') scheduleAI();
+  }
+
+  function playerLabel(p) {
+    return (mode === 'ai' && p === 'O') ? 'Computer' : `Player ${p}`;
+  }
+
+  function render() {
+    document.querySelectorAll('.cell').forEach((cell, i) => {
+      const v = board[i];
+      cell.className = 'cell' + (v ? ' taken ' + v.toLowerCase() : '');
+      cell.innerHTML = v ? `<span class="mark">${v}</span>` : '';
+    });
+
+    const st = document.getElementById('status');
+    if (!gameOver) {
+      st.textContent = `${playerLabel(current)}'s turn${aiThinking ? ' …' : ''}`;
+      st.className = 'status ' + current.toLowerCase();
     }
 
-    function render() {
-      const cells = document.querySelectorAll('.cell');
-      cells.forEach((cell, i) => {
-        cell.textContent = board[i] ?? '';
-        cell.className = 'cell' + (board[i] ? ' taken ' + board[i].toLowerCase() : '');
-      });
-      const status = document.getElementById('status');
-      if (!gameOver) {
-        status.textContent = `Player ${current}'s turn`;
-        status.className = 'status ' + current.toLowerCase();
-      }
-      document.getElementById('score-x').textContent = scores.X;
-      document.getElementById('score-o').textContent = scores.O;
-      document.getElementById('score-draw').textContent = scores.draw;
-    }
+    document.getElementById('score-x').textContent    = scores.X;
+    document.getElementById('score-o').textContent    = scores.O;
+    document.getElementById('score-draw').textContent = scores.draw;
+    document.getElementById('label-o').textContent    = mode === 'ai' ? 'Computer' : 'Player O';
 
-    function checkWin() {
-      for (const [a, b, c] of WINS) {
-        if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-          return [a, b, c];
-        }
-      }
-      return null;
-    }
+    document.getElementById('si-x').classList.toggle('active-turn', !gameOver && current === 'X');
+    document.getElementById('si-o').classList.toggle('active-turn', !gameOver && current === 'O');
+  }
 
-    function handleClick(e) {
-      const cell = e.target.closest('.cell');
-      if (!cell || gameOver) return;
-      const i = +cell.dataset.i;
-      if (board[i]) return;
+  // ── Place & resolve ───────────────────────────────────────
+  function place(i) {
+    if (board[i] || gameOver || (mode === 'ai' && current === 'O')) return false;
+    commit(i); return true;
+  }
 
-      board[i] = current;
-      render();
+  function commit(i) {
+    board[i] = current;
+    const cell = document.querySelectorAll('.cell')[i];
+    cell.className = `cell taken just-placed ${current.toLowerCase()}`;
+    cell.innerHTML = `<span class="mark">${current}</span>`;
+    setTimeout(() => cell.classList.remove('just-placed'), 220);
+    resolve();
+  }
 
-      const win = checkWin();
-      const status = document.getElementById('status');
-
-      if (win) {
+  function resolve() {
+    for (let w = 0; w < WINS.length; w++) {
+      const [a,b,c] = WINS[w];
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
         gameOver = true;
         scores[current]++;
-        win.forEach(idx => document.querySelectorAll('.cell')[idx].classList.add('winning'));
-        status.textContent = `Player ${current} wins!`;
-        status.className = 'status win ' + current.toLowerCase();
-        document.getElementById('score-' + current.toLowerCase()).textContent = scores[current];
-      } else if (board.every(Boolean)) {
-        gameOver = true;
-        scores.draw++;
-        status.textContent = "It's a draw!";
-        status.className = 'status win';
-        document.getElementById('score-draw').textContent = scores.draw;
-      } else {
-        current = current === 'X' ? 'O' : 'X';
-        render();
+        if (mode === '2p') nextFirst = current === 'X' ? 'O' : 'X';
+
+        WINS[w].forEach(idx => document.querySelectorAll('.cell')[idx].classList.add('winning'));
+
+        const [x1,y1,x2,y2] = WIN_LINES[w];
+        const ln = document.getElementById('win-line');
+        ln.setAttribute('x1',x1); ln.setAttribute('y1',y1);
+        ln.setAttribute('x2',x2); ln.setAttribute('y2',y2);
+        const svg = document.getElementById('win-svg');
+        svg.classList.remove('show'); void svg.offsetWidth; svg.classList.add('show');
+
+        const st = document.getElementById('status');
+        st.textContent = `${playerLabel(current)} wins!`;
+        st.className = `status win ${current.toLowerCase()}`;
+        document.getElementById(`score-${current.toLowerCase()}`).textContent = scores[current];
+        document.getElementById('si-x').classList.remove('active-turn');
+        document.getElementById('si-o').classList.remove('active-turn');
+        return;
       }
     }
 
-    document.getElementById('board').addEventListener('click', handleClick);
-    document.getElementById('restart').addEventListener('click', init);
+    if (board.every(Boolean)) {
+      gameOver = true; scores.draw++;
+      if (mode === '2p') nextFirst = nextFirst === 'X' ? 'O' : 'X';
+      const st = document.getElementById('status');
+      st.textContent = "It's a draw!"; st.className = 'status win';
+      document.getElementById('score-draw').textContent = scores.draw;
+      document.getElementById('si-x').classList.remove('active-turn');
+      document.getElementById('si-o').classList.remove('active-turn');
+      return;
+    }
 
+    current = current === 'X' ? 'O' : 'X';
+    render();
+    if (mode === 'ai' && current === 'O') scheduleAI();
+  }
+
+  // ── AI ────────────────────────────────────────────────────
+  function scheduleAI() {
+    aiThinking = true; render();
+    setTimeout(() => {
+      aiThinking = false;
+      if (!gameOver) { commit(bestMove([...board])); }
+    }, 380);
+  }
+
+  function winner(b) {
+    for (const [p,q,r] of WINS) if (b[p] && b[p]===b[q] && b[p]===b[r]) return b[p];
+    return null;
+  }
+
+  function minimax(b, isO, depth) {
+    const w = winner(b);
+    if (w === 'O') return 10 - depth;
+    if (w === 'X') return depth - 10;
+    if (b.every(Boolean)) return 0;
+    let best = isO ? -Infinity : Infinity;
+    for (let i = 0; i < 9; i++) {
+      if (!b[i]) {
+        b[i] = isO ? 'O' : 'X';
+        const v = minimax(b, !isO, depth + 1);
+        b[i] = null;
+        best = isO ? Math.max(best, v) : Math.min(best, v);
+      }
+    }
+    return best;
+  }
+
+  function bestMove(b) {
+    let best = -Infinity, move = -1;
+    for (let i = 0; i < 9; i++) {
+      if (!b[i]) {
+        b[i] = 'O';
+        const v = minimax(b, false, 1);
+        b[i] = null;
+        if (v > best) { best = v; move = i; }
+      }
+    }
+    return move;
+  }
+
+  // ── Events ────────────────────────────────────────────────
+  document.getElementById('board').addEventListener('click', e => {
+    const cell = e.target.closest('.cell');
+    if (!cell || aiThinking) return;
+    place(+cell.dataset.i);
+  });
+
+  document.addEventListener('keydown', e => {
+    if (aiThinking || gameOver) return;
+    const i = KEY_MAP[e.key];
+    if (i !== undefined) place(i);
+  });
+
+  document.getElementById('restart').addEventListener('click', init);
+
+  document.getElementById('btn-2p').addEventListener('click', () => {
+    mode = '2p'; scores = null; nextFirst = 'X';
+    document.getElementById('btn-2p').classList.add('active');
+    document.getElementById('btn-ai').classList.remove('active');
     init();
-  </script>
+  });
+  document.getElementById('btn-ai').addEventListener('click', () => {
+    mode = 'ai'; scores = null; nextFirst = 'X';
+    document.getElementById('btn-ai').classList.add('active');
+    document.getElementById('btn-2p').classList.remove('active');
+    init();
+  });
+
+  init();
+</script>
 </body>
 </html>

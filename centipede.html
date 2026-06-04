@@ -8,29 +8,19 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       background: #050805;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
       min-height: 100vh;
-      font-family: 'Courier New', monospace;
-      color: #0f0;
+      font-family: 'Courier New', monospace; color: #0f0;
     }
     #hud {
-      display: flex;
-      justify-content: space-between;
-      width: 600px;
-      padding: 6px 2px;
-      font-size: 15px;
-      letter-spacing: 1px;
+      display: flex; justify-content: space-between;
+      width: 600px; padding: 6px 2px;
+      font-size: 15px; letter-spacing: 1px;
     }
     canvas { display: block; border: 2px solid #1a3a1a; }
     #controls {
-      width: 600px;
-      padding: 6px 2px;
-      font-size: 11px;
-      color: #3a5a3a;
-      text-align: center;
+      width: 600px; padding: 6px 2px;
+      font-size: 11px; color: #3a5a3a; text-align: center;
     }
   </style>
 </head>
@@ -38,7 +28,7 @@
   <div id="hud">
     <span>SCORE <span id="sv">0</span></span>
     <span>LEVEL <span id="lv">1</span></span>
-    <span>HI <span id="hv">0</span></span>
+    <span>HI&nbsp;&nbsp;<span id="hv">0</span></span>
     <span>LIVES <span id="liv">♥♥♥</span></span>
   </div>
   <canvas id="c" width="600" height="600"></canvas>
@@ -51,25 +41,31 @@
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
 
-  const CELL  = 20;
-  const COLS  = 30;
-  const ROWS  = 30;
-  const PZONE = 25;          // player lives in rows 25-29
-  const BASE_MS = 110;       // ms per centipede step at level 1
+  const CELL   = 20;
+  const COLS   = 30;
+  const ROWS   = 30;
+  const PZONE  = 25;       // player zone starts at row 25
+  const BASE_MS = 110;     // ms per centipede step at level 1
+
+  // ── Helpers ────────────────────────────────────────────────
+  const mix   = (a, b, t) => a + (b - a) * t;
+  const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 
   // ── State ──────────────────────────────────────────────────
-  let state;                 // 'title' | 'playing' | 'dead' | 'gameover' | 'paused'
+  let state = 'title';
   let score, hiScore, lives, level;
-  let mushrooms;             // Uint8Array[ROWS][COLS], values 0-4
-  let trains;                // [{segs:[{col,row}], dir:±1, prev:[{col,row}]}]
-  let player;                // {x, y}  px
-  let bullets;               // [{x, y}]
-  let sparks;                // [{x,y,vx,vy,color,life}]
+  let mushrooms;
+  let trains;
+  let player;
+  let bullets, sparks, floats;
+  let flea, spider;
+  let invincible;
   let tickMs, tickTimer, shootCd;
+  let fleaTimer, spiderTimer;
+  let levelClearTimer;
   let prevTs = 0;
 
-  hiScore = 0;
-  state   = 'title';
+  hiScore = parseInt(localStorage.getItem('centipede_hi') || '0');
 
   // ── Input ──────────────────────────────────────────────────
   const K = {};
@@ -77,14 +73,13 @@
     if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
       e.preventDefault();
     K[e.code] = true;
-
     if (e.code === 'KeyP') {
       if (state === 'playing') { state = 'paused'; return; }
       if (state === 'paused')  { state = 'playing'; prevTs = performance.now(); return; }
     }
     if (e.code === 'Space') {
       if (state === 'title' || state === 'gameover') { startGame(); return; }
-      if (state === 'dead') { resumeRound(); return; }
+      if (state === 'dead') { resumeAfterDeath(); return; }
     }
   });
   window.addEventListener('keyup', e => delete K[e.code]);
@@ -92,36 +87,36 @@
   // ── Game setup ─────────────────────────────────────────────
   function startGame() {
     score = 0; lives = 3; level = 1; tickMs = BASE_MS;
+    mushrooms = buildMushrooms();
     newRound();
     state = 'playing';
   }
 
-  function resumeRound() {
+  function resumeAfterDeath() {
+    // Mushrooms are KEPT — player worked to damage them
     newRound();
     state = 'playing';
     prevTs = performance.now();
   }
 
   function newRound() {
-    mushrooms = buildMushrooms();
-    trains    = [buildTrain(12, 1)];
-    player    = { x: 15 * CELL, y: (ROWS - 2) * CELL + CELL / 2 };
-    bullets   = [];
-    sparks    = [];
-    tickTimer = 0;
-    shootCd   = 0;
+    trains  = [buildTrain(12, 1)];
+    player  = { x: 15 * CELL, y: (ROWS - 2) * CELL + CELL / 2 };
+    bullets = []; sparks = []; floats = [];
+    flea = null; spider = null;
+    tickTimer = 0; shootCd = 0;
+    invincible   = 2.0;   // 2s of invincibility after spawn
+    fleaTimer    = 15 + Math.random() * 10;
+    spiderTimer  = 12 + Math.random() * 10;
+    levelClearTimer = 0;
   }
 
   function advanceLevel() {
     level++;
     score += 1000;
-    tickMs = Math.max(38, BASE_MS - (level - 1) * 7);
+    tickMs    = Math.max(38, BASE_MS - (level - 1) * 7);
     mushrooms = buildMushrooms();
-    trains    = [buildTrain(Math.min(20, 11 + level), 1)];
-    player    = { x: 15 * CELL, y: (ROWS - 2) * CELL + CELL / 2 };
-    bullets   = [];
-    sparks    = [];
-    tickTimer = 0;
+    newRound();
   }
 
   function buildMushrooms() {
@@ -138,11 +133,16 @@
   }
 
   // ── Update ─────────────────────────────────────────────────
-  const PSPD    = 260;   // player px/s
-  const BSPD    = 680;   // bullet px/s
-  const SHOOT_CD = 0.22; // s between shots
+  const PSPD     = 260;
+  const BSPD     = 680;
+  const SHOOT_CD = 0.22;
+  const FLEA_SPD = 340;
+  const SPD_X    = 190;   // spider horizontal speed
+  const SPD_AMP  = 55;    // spider vertical oscillation amplitude px
+  const SPD_FREQ = 1.8;   // Hz
 
   function update(dt) {
+    if (invincible > 0) invincible -= dt;
     shootCd = Math.max(0, shootCd - dt);
 
     // Player movement
@@ -150,7 +150,7 @@
     if (K.ArrowRight || K.KeyD) player.x += PSPD * dt;
     if (K.ArrowUp    || K.KeyW) player.y -= PSPD * dt;
     if (K.ArrowDown  || K.KeyS) player.y += PSPD * dt;
-    player.x = clamp(player.x, CELL / 2, COLS * CELL - CELL / 2);
+    player.x = clamp(player.x, CELL / 2,       COLS * CELL - CELL / 2);
     player.y = clamp(player.y, PZONE * CELL + CELL / 2, ROWS * CELL - CELL / 2);
 
     // Shoot
@@ -167,8 +167,8 @@
     bullets = bullets.filter(b => {
       const c = Math.floor(b.x / CELL), r = Math.floor(b.y / CELL);
       if (r >= 0 && r < ROWS && c >= 0 && c < COLS && mushrooms[r][c] > 0) {
-        if (--mushrooms[r][c] === 0) score += 5;
-        addSparks(c * CELL + CELL / 2, r * CELL + CELL / 2, 4, '#2a8');
+        if (--mushrooms[r][c] === 0) { score += 5; addFloat(b.x, r * CELL + CELL / 2, '+5', '#3c8'); }
+        addSparks(c * CELL + CELL / 2, r * CELL + CELL / 2, 3, '#2a8');
         return false;
       }
       return true;
@@ -177,16 +177,16 @@
     // Bullet vs centipede
     outer:
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
-      const b  = bullets[bi];
+      const b = bullets[bi];
       const bc = Math.floor(b.x / CELL), br = Math.floor(b.y / CELL);
       for (let ti = 0; ti < trains.length; ti++) {
         const train = trains[ti];
         const si = train.segs.findIndex(s => s.col === bc && s.row === br);
         if (si === -1) continue;
 
-        score += si === 0 ? 100 : 10;
-        if (score > hiScore) hiScore = score;
-
+        const pts = si === 0 ? 100 : 10;
+        score += pts;
+        addFloat(b.x, br * CELL + CELL / 2, `+${pts}`, si === 0 ? '#fd4' : '#fc9');
         const hit = train.segs[si];
         if (hit.row < ROWS) mushrooms[hit.row][hit.col] = 4;
         addSparks(hit.col * CELL + CELL / 2, hit.row * CELL + CELL / 2, 8, '#f80');
@@ -204,7 +204,12 @@
 
     // Level clear
     trains = trains.filter(t => t.segs.length > 0);
-    if (trains.length === 0) { advanceLevel(); return; }
+    if (trains.length === 0) {
+      state = 'levelclear';
+      levelClearTimer = 2.2;
+      addSparks(300, 300, 24, '#0f0');
+      updateHUD(); return;
+    }
 
     // Centipede ticks
     tickTimer += dt * 1000;
@@ -216,27 +221,34 @@
       }
     }
 
-    // Centipede vs player
-    const lerp = clamp(tickTimer / tickMs, 0, 1);
-    for (const train of trains) {
-      for (let i = 0; i < train.segs.length; i++) {
-        const s = train.segs[i], p = train.prev[i] || s;
-        const sx = lv(p.col, s.col, lerp) * CELL + CELL / 2;
-        const sy = lv(p.row, s.row, lerp) * CELL + CELL / 2;
-        if (Math.hypot(player.x - sx, player.y - sy) < CELL * 0.78) {
-          addSparks(player.x, player.y, 14, '#0f0');
-          lives--;
-          if (score > hiScore) hiScore = score;
-          state = lives > 0 ? 'dead' : 'gameover';
-          updateHUD(); return;
+    // Centipede vs player (uses interpolated position)
+    if (invincible <= 0) {
+      const lerpT = clamp(tickTimer / tickMs, 0, 1);
+      for (const train of trains) {
+        for (let i = 0; i < train.segs.length; i++) {
+          const s = train.segs[i], p = train.prev[i] || s;
+          const sx = mix(p.col, s.col, lerpT) * CELL + CELL / 2;
+          const sy = mix(p.row, s.row, lerpT) * CELL + CELL / 2;
+          if (Math.hypot(player.x - sx, player.y - sy) < CELL * 0.78) {
+            killPlayer(); return;
+          }
         }
       }
     }
 
-    // Sparks
+    // Flea
+    updateFlea(dt);
+
+    // Spider
+    updateSpider(dt);
+
+    // Sparks & floats
     sparks.forEach(s => { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
     sparks = sparks.filter(s => s.life > 0);
+    floats.forEach(f => { f.y -= 45 * dt; f.life -= dt; });
+    floats = floats.filter(f => f.life > 0);
 
+    if (score > hiScore) { hiScore = score; localStorage.setItem('centipede_hi', hiScore); }
     updateHUD();
   }
 
@@ -246,7 +258,6 @@
     const wall = nc < 0 || nc >= COLS;
     const mush = !wall && mushrooms[head.row][nc] > 0;
 
-    // Shift body
     for (let i = t.segs.length - 1; i >= 1; i--) t.segs[i] = { ...t.segs[i - 1] };
 
     if (wall || mush) {
@@ -258,12 +269,114 @@
     }
   }
 
+  function updateFlea(dt) {
+    // Spawn when mushroom count is low or timer fires
+    if (!flea) {
+      fleaTimer -= dt;
+      let mcount = 0;
+      for (let r = 0; r < PZONE; r++) for (let c = 0; c < COLS; c++) if (mushrooms[r][c]) mcount++;
+      if (fleaTimer <= 0 || mcount < 6) {
+        flea = { col: Math.floor(Math.random() * COLS), y: -CELL };
+        flea.x = flea.col * CELL + CELL / 2;
+        flea.prevRow = -1;
+        fleaTimer = 14 + Math.random() * 10;
+      }
+      return;
+    }
+
+    const speed = FLEA_SPD + level * 15;
+    flea.y += speed * dt;
+
+    // Drop mushroom when crossing into a new row (~40% chance per row)
+    const row = Math.floor(flea.y / CELL);
+    if (row !== flea.prevRow) {
+      flea.prevRow = row;
+      if (row >= 0 && row < PZONE && !mushrooms[row][flea.col] && Math.random() < 0.40)
+        mushrooms[row][flea.col] = 4;
+    }
+
+    if (flea.y > ROWS * CELL) { flea = null; return; }
+
+    // Bullet hit
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      const b = bullets[bi];
+      if (Math.hypot(b.x - flea.x, b.y - flea.y) < CELL) {
+        score += 200;
+        addFloat(flea.x, flea.y, '+200', '#ff0');
+        addSparks(flea.x, flea.y, 10, '#ff0');
+        flea = null; bullets.splice(bi, 1); return;
+      }
+    }
+
+    // Player hit
+    if (invincible <= 0 && Math.hypot(player.x - flea.x, player.y - flea.y) < CELL * 0.8) {
+      flea = null; killPlayer();
+    }
+  }
+
+  function updateSpider(dt) {
+    if (!spider) {
+      spiderTimer -= dt;
+      if (spiderTimer <= 0) {
+        const fromLeft = Math.random() < 0.5;
+        spider = {
+          x:     fromLeft ? -CELL : COLS * CELL + CELL,
+          baseY: (PZONE + 1 + Math.floor(Math.random() * 3)) * CELL + CELL / 2,
+          vx:    fromLeft ? SPD_X : -SPD_X,
+          time:  0,
+        };
+        spiderTimer = 18 + Math.random() * 14;
+      }
+      return;
+    }
+
+    spider.x    += spider.vx * dt;
+    spider.time += dt;
+    const sy = spider.baseY + Math.sin(spider.time * SPD_FREQ * Math.PI * 2) * SPD_AMP;
+
+    // Eat mushrooms
+    const sc = Math.floor(spider.x / CELL), sr = Math.floor(sy / CELL);
+    if (sc >= 0 && sc < COLS && sr >= 0 && sr < ROWS && mushrooms[sr][sc] > 0)
+      mushrooms[sr][sc] = 0;
+
+    // Off screen
+    if (spider.x < -CELL * 2 || spider.x > COLS * CELL + CELL * 2) { spider = null; return; }
+
+    // Bullet hit
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      const b = bullets[bi];
+      if (Math.hypot(b.x - spider.x, b.y - sy) < CELL) {
+        score += 300;
+        addFloat(spider.x, sy, '+300', '#f66');
+        addSparks(spider.x, sy, 12, '#f44');
+        spider = null; bullets.splice(bi, 1); return;
+      }
+    }
+
+    // Player hit
+    if (invincible <= 0 && Math.hypot(player.x - spider.x, player.y - sy) < CELL * 0.85) {
+      spider = null; killPlayer();
+    }
+  }
+
+  function killPlayer() {
+    addSparks(player.x, player.y, 16, '#0f0');
+    lives--;
+    if (score > hiScore) { hiScore = score; localStorage.setItem('centipede_hi', hiScore); }
+    state = lives > 0 ? 'dead' : 'gameover';
+    updateHUD();
+  }
+
   function addSparks(x, y, n, color) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const v = 60 + Math.random() * 130;
       sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.28 + Math.random() * 0.2 });
     }
+  }
+
+  function addFloat(x, y, text, color) {
+    floats.push({ x, y, text, color, life: 1.0 });
   }
 
   function updateHUD() {
@@ -274,18 +387,22 @@
   }
 
   // ── Draw ───────────────────────────────────────────────────
-  function lv(a, b, t) { return a + (b - a) * t; }
-  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
   const MUSH_CLR = [null, '#174017', '#245c24', '#318031', '#3ea43e'];
 
   function draw() {
     ctx.fillStyle = '#060a06';
     ctx.fillRect(0, 0, 600, 600);
 
+    // Danger zone tint when centipede is in player area
+    const danger = (trains || []).some(t => t.segs.some(s => s.row >= PZONE));
+    if (danger) {
+      ctx.fillStyle = 'rgba(200,0,0,0.07)';
+      ctx.fillRect(0, PZONE * CELL, 600, (ROWS - PZONE) * CELL);
+    }
+
     // Player zone divider
-    ctx.strokeStyle = '#102010';
-    ctx.lineWidth   = 1;
+    ctx.strokeStyle = danger ? '#3a1010' : '#102010';
+    ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
     ctx.beginPath(); ctx.moveTo(0, PZONE * CELL); ctx.lineTo(600, PZONE * CELL); ctx.stroke();
     ctx.setLineDash([]);
@@ -298,10 +415,8 @@
         const mx = c * CELL + CELL / 2, my = r * CELL + CELL / 2;
         ctx.fillStyle = MUSH_CLR[h];
         ctx.beginPath(); ctx.arc(mx, my, CELL / 2 - 3, 0, Math.PI * 2); ctx.fill();
-        // Damage lines
         if (h < 4) {
-          ctx.strokeStyle = '#060a06';
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = '#060a06'; ctx.lineWidth = 1.5;
           for (let d = 0; d < 4 - h; d++) {
             ctx.beginPath();
             ctx.moveTo(mx - 4 + d * 3, my - 3);
@@ -313,45 +428,74 @@
     }
 
     // Centipede
-    const lerp = clamp(tickTimer / tickMs, 0, 1);
-    for (const train of (trains || [])) {
-      for (let i = train.segs.length - 1; i >= 0; i--) {
-        const s = train.segs[i], p = train.prev[i] || s;
-        const x = lv(p.col, s.col, lerp) * CELL + CELL / 2;
-        const y = lv(p.row, s.row, lerp) * CELL + CELL / 2;
-        const r = CELL / 2 - 2;
-        ctx.fillStyle = i === 0 ? '#d94' : '#b73';
-        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = i === 0 ? '#a63' : '#823';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(x, y, r - 2, 0, Math.PI * 2); ctx.stroke();
-        // Eyes on head
-        if (i === 0) {
-          ctx.fillStyle = '#fff';
-          ctx.beginPath(); ctx.arc(x - 3, y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
-          ctx.beginPath(); ctx.arc(x + 3, y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#111';
-          ctx.beginPath(); ctx.arc(x - 2.5, y - 2, 1.2, 0, Math.PI * 2); ctx.fill();
-          ctx.beginPath(); ctx.arc(x + 3.5, y - 2, 1.2, 0, Math.PI * 2); ctx.fill();
+    if (trains) {
+      const lerpT = clamp(tickTimer / (tickMs || 1), 0, 1);
+      for (const train of trains) {
+        for (let i = train.segs.length - 1; i >= 0; i--) {
+          const s = train.segs[i], p = train.prev[i] || s;
+          const x = mix(p.col, s.col, lerpT) * CELL + CELL / 2;
+          const y = mix(p.row, s.row, lerpT) * CELL + CELL / 2;
+          const r = CELL / 2 - 2;
+          ctx.fillStyle = i === 0 ? '#d94' : '#b73';
+          ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = i === 0 ? '#a63' : '#823';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(x, y, r - 2, 0, Math.PI * 2); ctx.stroke();
+          if (i === 0) {
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(x - 3, y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(x + 3, y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#111';
+            ctx.beginPath(); ctx.arc(x - 2.5, y - 2, 1.2, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(x + 3.5, y - 2, 1.2, 0, Math.PI * 2); ctx.fill();
+          }
         }
       }
+    }
+
+    // Flea
+    if (flea) {
+      ctx.fillStyle = '#dd0';
+      ctx.beginPath(); ctx.ellipse(flea.x, flea.y, 4, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#aa0'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(flea.x - 2, flea.y - 6); ctx.lineTo(flea.x - 5, flea.y - 11); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(flea.x + 2, flea.y - 6); ctx.lineTo(flea.x + 5, flea.y - 11); ctx.stroke();
+    }
+
+    // Spider
+    if (spider) {
+      const sy = spider.baseY + Math.sin(spider.time * SPD_FREQ * Math.PI * 2) * SPD_AMP;
+      ctx.strokeStyle = '#d44'; ctx.lineWidth = 1.5;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(spider.x + Math.cos(a) * (CELL / 2 - 2), sy + Math.sin(a) * (CELL / 2 - 2));
+        ctx.lineTo(spider.x + Math.cos(a) * (CELL - 3),     sy + Math.sin(a) * (CELL - 3));
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#d44';
+      ctx.beginPath(); ctx.arc(spider.x, sy, CELL / 2 - 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f66';
+      ctx.beginPath(); ctx.arc(spider.x, sy, CELL / 2 - 6, 0, Math.PI * 2); ctx.fill();
     }
 
     // Bullets
     ctx.fillStyle = '#ff0';
     for (const b of (bullets || [])) ctx.fillRect(b.x - 1.5, b.y - 7, 3, 10);
 
-    // Player
-    if (state === 'playing' || state === 'paused' || state === 'dead') {
-      const px = player.x, py = player.y;
+    // Player (flash during invincibility)
+    const showPlayer = state !== 'gameover' && player &&
+      (invincible <= 0 || Math.floor(invincible * 8) % 2 === 0);
+    if (showPlayer) {
+      const { x: px, y: py } = player;
       ctx.fillStyle = '#0f0';
       ctx.beginPath();
       ctx.moveTo(px, py - CELL / 2);
       ctx.lineTo(px + CELL / 2 - 1, py + CELL / 2 - 1);
       ctx.lineTo(px - CELL / 2 + 1, py + CELL / 2 - 1);
       ctx.closePath(); ctx.fill();
-      // Barrel
-      ctx.fillStyle = '#0c0';
+      // Barrel — brighter when ready to shoot
+      ctx.fillStyle = shootCd > 0 ? '#050' : '#0f0';
       ctx.fillRect(px - 2, py - CELL / 2 - 5, 4, 7);
     }
 
@@ -361,49 +505,79 @@
       ctx.fillStyle = s.color;
       ctx.beginPath(); ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2); ctx.fill();
     }
+
+    // Floating score texts
+    ctx.font = 'bold 14px "Courier New"';
+    ctx.textAlign = 'center';
+    for (const f of (floats || [])) {
+      ctx.globalAlpha = clamp(f.life * 2.5, 0, 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    }
     ctx.globalAlpha = 1;
 
     // ── Overlays ──────────────────────────────────────────────
     if (state === 'title') {
-      darkOverlay(0.65);
-      centeredText('CENTIPEDE', 'bold 54px "Courier New"', '#0f0', 210);
-      centeredText('PRESS SPACE TO START', '17px "Courier New"', '#8a8', 270);
-      centeredText('ARROW KEYS / WASD  ·  SPACE TO FIRE  ·  P PAUSE', '13px "Courier New"', '#3a5a3a', 310);
+      overlay(0.68);
+      big('CENTIPEDE', '#0f0', 200);
+      small('PRESS SPACE TO START', '#8a8', 262);
+      small('ARROW KEYS / WASD  ·  SPACE TO FIRE  ·  P PAUSE', '#3a5a3a', 300);
+      if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#555', 338);
     }
     if (state === 'gameover') {
-      darkOverlay(0.7);
-      centeredText('GAME OVER', 'bold 52px "Courier New"', '#e33', 215);
-      centeredText(`SCORE  ${score}`, '20px "Courier New"', '#0f0', 272);
-      centeredText(`HI SCORE  ${hiScore}`, '16px "Courier New"', '#6a6', 305);
-      centeredText('PRESS SPACE TO PLAY AGAIN', '16px "Courier New"', '#7a7', 345);
+      overlay(0.72);
+      big('GAME OVER', '#e33', 205);
+      small(`SCORE  ${score}`, '#0f0', 265);
+      small(`HI SCORE  ${hiScore}`, '#6a6', 298);
+      small('PRESS SPACE TO PLAY AGAIN', '#7a7', 340);
     }
     if (state === 'dead') {
-      darkOverlay(0.45);
-      centeredText('YOU DIED', 'bold 44px "Courier New"', '#f80', 220);
-      centeredText(`LIVES REMAINING  ${'♥'.repeat(lives)}`, '18px "Courier New"', '#0f0', 278);
-      centeredText('PRESS SPACE TO CONTINUE', '15px "Courier New"', '#7a7', 315);
+      overlay(0.42);
+      big('YOU DIED', '#f80', 215);
+      small(`LIVES REMAINING  ${'♥'.repeat(lives)}`, '#0f0', 272);
+      small('PRESS SPACE TO CONTINUE', '#7a7', 308);
+    }
+    if (state === 'levelclear') {
+      overlay(0.38);
+      big(`LEVEL ${level}`, '#0f0', 220);
+      big('COMPLETE!', '#fd4', 270);
+      small('+1000 BONUS', '#fa0', 318);
     }
     if (state === 'paused') {
-      darkOverlay(0.5);
-      centeredText('PAUSED', 'bold 48px "Courier New"', '#ff0', 250);
-      centeredText('P  TO RESUME', '17px "Courier New"', '#aa0', 305);
+      overlay(0.52);
+      big('PAUSED', '#ff0', 248);
+      small('P  TO RESUME', '#aa0', 302);
     }
   }
 
-  function darkOverlay(a) {
-    ctx.fillStyle = `rgba(0,0,0,${a})`;
-    ctx.fillRect(0, 0, 600, 600);
+  function overlay(a) {
+    ctx.fillStyle = `rgba(0,0,0,${a})`; ctx.fillRect(0, 0, 600, 600);
   }
-  function centeredText(txt, font, color, y) {
-    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = 'center';
-    ctx.fillText(txt, 300, y);
+  function big(t, color, y) {
+    ctx.fillStyle = color; ctx.font = 'bold 50px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, 300, y);
+  }
+  function small(t, color, y) {
+    ctx.fillStyle = color; ctx.font = '15px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, 300, y);
   }
 
   // ── Main loop ──────────────────────────────────────────────
   function frame(ts) {
     const dt = Math.min((ts - prevTs) / 1000, 0.05);
     prevTs = ts;
-    if (state === 'playing') update(dt);
+
+    if (state === 'playing') {
+      update(dt);
+    } else if (state === 'levelclear') {
+      levelClearTimer -= dt;
+      sparks.forEach(s => { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
+      sparks = sparks.filter(s => s.life > 0);
+      floats.forEach(f => { f.y -= 45 * dt; f.life -= dt; });
+      floats = floats.filter(f => f.life > 0);
+      if (levelClearTimer <= 0) { advanceLevel(); state = 'playing'; }
+    }
+
     draw();
     requestAnimationFrame(frame);
   }
