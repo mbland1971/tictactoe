@@ -1,6 +1,6 @@
 # Arcade Games
 
-Three classic arcade games that run entirely in the browser — no installation or server required. Open any HTML file directly in any web browser.
+Four classic arcade games that run entirely in the browser — no installation or server required. Open any HTML file directly in any web browser.
 
 ---
 
@@ -118,6 +118,50 @@ A browser remake of the classic Atari vector-graphics arcade game. Pilot your sh
 
 ---
 
+## Space Invaders
+
+A browser remake of the classic Taito arcade game. Defend Earth from waves of descending alien invaders.
+
+**File:** `space-invaders.html`
+
+### How to Play
+
+1. Open `space-invaders.html` in any web browser.
+2. Move your cannon left and right and shoot the invaders before they reach the ground.
+3. Use the shields for cover — but they degrade with each hit.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Arrow Left / A | Move left |
+| Arrow Right / D | Move right |
+| Space | Fire |
+| P | Pause / Unpause |
+
+### Rules
+
+- The invader grid marches sideways, dropping one row each time it reaches a wall — and speeding up as aliens are destroyed.
+- **Three alien types** are arranged in rows, each worth different point values.
+- You can only have **one bullet in the air** at a time.
+- Four **shields** protect you but erode when hit by your shots or enemy fire, and are destroyed when invaders march over them.
+- A **mystery saucer** occasionally flies across the top of the screen for a random bonus.
+- If any invader reaches the cannon's row (or lands), you lose a life.
+- You start with **3 lives**. The game ends when all lives are lost.
+- Your high score is saved for the session.
+
+### Scoring
+
+| Event | Points |
+|-------|--------|
+| Squid (bottom 2 rows) | 10 |
+| Crab (middle 2 rows) | 20 |
+| Octopus (top row) | 30 |
+| Mystery saucer | 50 / 100 / 150 / 300 (random) |
+| Clear a wave | 1,000 bonus |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -127,13 +171,14 @@ All games are built with plain HTML, CSS, and vanilla JavaScript — no framewor
 | Structure | HTML5 |
 | Styling | CSS3 |
 | Logic | Vanilla JavaScript |
-| Rendering (Centipede, Asteroids) | HTML5 Canvas 2D |
+| Rendering (Centipede, Asteroids, Space Invaders) | HTML5 Canvas 2D |
 
 ## File Structure
 
 ```
 arcade-games/
-├── tic-tac-toe.html    # Two-player Tic Tac Toe
-├── centipede.html      # Single-player Centipede arcade game
-└── asteroids.html      # Single-player Asteroids arcade game
+├── tic-tac-toe.html      # Two-player Tic Tac Toe
+├── centipede.html        # Single-player Centipede arcade game
+├── asteroids.html        # Single-player Asteroids arcade game
+└── space-invaders.html   # Single-player Space Invaders arcade game
 ```

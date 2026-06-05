@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Space Invaders</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #030206;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace; color: #c8f;
+    }
+    #hud {
+      display: flex; justify-content: space-between;
+      width: 600px; padding: 6px 2px;
+      font-size: 15px; letter-spacing: 1px;
+    }
+    canvas { display: block; border: 2px solid #1a0a2a; }
+    #controls {
+      width: 600px; padding: 6px 2px;
+      font-size: 11px; color: #3a2050; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <span>SCORE <span id="sv">0</span></span>
+    <span>LEVEL <span id="lv">1</span></span>
+    <span>HI&nbsp;&nbsp;<span id="hv">0</span></span>
+    <span>LIVES <span id="liv">▲▲▲</span></span>
+  </div>
+  <canvas id="c" width="600" height="600"></canvas>
+  <div id="controls">
+    Arrow Keys / A D — Move &nbsp;|&nbsp; Space — Fire &nbsp;|&nbsp; P — Pause
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx    = canvas.getContext('2d');
+  const W = 600, H = 600;
+
+  // ── Constants ──────────────────────────────────────────────
+  const PLAYER_SPD  = 260;
+  const PLAYER_Y    = H - 48;
+  const BULLET_SPD  = 520;
+  const SHOOT_CD    = 0.45;
+  const INV_TIME    = 2.2;
+
+  const COLS = 11, ROWS_INV = 5;
+  const INV_W = 36, INV_H = 24, INV_GAP_X = 12, INV_GAP_Y = 14;
+  const GRID_W = COLS * INV_W + (COLS - 1) * INV_GAP_X;
+  const GRID_X0 = (W - GRID_W) / 2;
+  const GRID_Y0 = 72;
+
+  // Points per row (top rows worth more)
+  const ROW_PTS = [30, 20, 20, 10, 10];
+
+  // Invader step timing: start interval, speed-up per kill, minimum
+  const STEP_BASE = 0.72;
+  const STEP_MIN  = 0.06;
+
+  const SHIELD_COUNT = 4;
+  const SAUCER_SPD   = 140;
+  const SAUCER_PTS   = [50, 100, 150, 300];
+
+  // ── State ──────────────────────────────────────────────────
+  let state = 'title';
+  let score, hiScore, lives, level;
+  let player, invaders, shields;
+  let bullets, invBullets;
+  let saucer;
+  let particles, floats;
+  let shootCd, stepTimer, stepInterval;
+  let stepDir, stepDrop;
+  let saucerTimer;
+  let levelClearTimer;
+  let prevTs = 0;
+
+  hiScore = parseInt(localStorage.getItem('sinvaders_hi') || '0');
+
+  // ── Input ──────────────────────────────────────────────────
+  const K = {};
+  window.addEventListener('keydown', e => {
+    if (['Space','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+    K[e.code] = true;
+    if (e.code === 'KeyP') {
+      if (state === 'playing') { state = 'paused'; return; }
+      if (state === 'paused')  { state = 'playing'; prevTs = performance.now(); return; }
+    }
+    if (e.code === 'Space') {
+      if (state === 'title' || state === 'gameover') { startGame(); return; }
+      if (state === 'dead') { resumeAfterDeath(); return; }
+    }
+  });
+  window.addEventListener('keyup', e => delete K[e.code]);
+
+  // ── Setup ──────────────────────────────────────────────────
+  function startGame() {
+    score = 0; lives = 3; level = 1;
+    buildLevel();
+    state = 'playing';
+  }
+
+  function resumeAfterDeath() {
+    // Keep existing invader grid; just respawn the player
+    player.x = W / 2;
+    player.invincible = INV_TIME;
+    bullets    = [];
+    invBullets = [];
+    particles  = []; floats = [];
+    shootCd    = 0;
+    state      = 'playing';
+    prevTs     = performance.now();
+  }
+
+  function buildLevel() {
+    invaders = [];
+    for (let r = 0; r < ROWS_INV; r++) {
+      for (let c = 0; c < COLS; c++) {
+        invaders.push({
+          row: r, col: c,
+          type: r === 0 ? 2 : r < 3 ? 1 : 0,  // 0=squid,1=crab,2=octopus
+          alive: true,
+          frame: 0,
+        });
+      }
+    }
+
+    stepDir      = 1;
+    stepDrop     = false;
+    stepInterval = Math.max(STEP_MIN, STEP_BASE - (level - 1) * 0.06);
+    stepTimer    = stepInterval;
+
+    shields    = buildShields();
+    player     = { x: W / 2, invincible: INV_TIME };
+    bullets    = []; invBullets = [];
+    particles  = []; floats = [];
+    shootCd    = 0;
+    saucer     = null;
+    saucerTimer = 18 + Math.random() * 14;
+  }
+
+  function buildShields() {
+    const out = [];
+    const sw = 52, sh = 34;
+    const gap = (W - SHIELD_COUNT * sw) / (SHIELD_COUNT + 1);
+    for (let i = 0; i < SHIELD_COUNT; i++) {
+      const sx = gap + i * (sw + gap);
+      const sy = H - 110;
+      // Pixel grid: 1 = intact, 0 = destroyed
+      const pixels = [];
+      for (let py = 0; py < sh; py++) {
+        pixels.push(new Uint8Array(sw));
+        for (let px = 0; px < sw; px++) {
+          // Arch cutout at bottom center
+          const cx = px - sw / 2, cy = sh - py;
+          const arch = cy < 12 && Math.abs(cx) < 14;
+          // Round top corners
+          const tl = px < 5 && py < 5 && (px + py < 6);
+          const tr = px >= sw - 5 && py < 5 && ((sw - 1 - px) + py < 6);
+          pixels[py][px] = (arch || tl || tr) ? 0 : 1;
+        }
+      }
+      out.push({ x: sx, y: sy, w: sw, h: sh, pixels });
+    }
+    return out;
+  }
+
+  function aliveCount() { return invaders.filter(i => i.alive).length; }
+
+  // ── Update ─────────────────────────────────────────────────
+  function update(dt) {
+    const p = player;
+    if (p.invincible > 0) p.invincible -= dt;
+    shootCd = Math.max(0, shootCd - dt);
+
+    // Player movement
+    if (K.ArrowLeft || K.KeyA) p.x -= PLAYER_SPD * dt;
+    if (K.ArrowRight || K.KeyD) p.x += PLAYER_SPD * dt;
+    p.x = Math.max(20, Math.min(W - 20, p.x));
+
+    // Shoot
+    if (K.Space && shootCd === 0 && bullets.length === 0) {
+      bullets.push({ x: p.x, y: PLAYER_Y - 16, vy: -BULLET_SPD });
+      shootCd = SHOOT_CD;
+    }
+
+    // Player bullet
+    for (const b of bullets) b.y += b.vy * dt;
+    bullets = bullets.filter(b => b.y > 0);
+
+    // Invader step
+    stepTimer -= dt;
+    if (stepTimer <= 0) {
+      stepInvaders();
+      stepTimer = stepInterval;
+    }
+
+    // Invader shoot
+    invaderShoot(dt);
+
+    // Invader bullets
+    for (const b of invBullets) b.y += b.vy * dt;
+    invBullets = invBullets.filter(b => b.y < H);
+
+    // Saucer
+    updateSaucer(dt);
+
+    // Bullet vs invader
+    outer:
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      const b = bullets[bi];
+      for (const inv of invaders) {
+        if (!inv.alive) continue;
+        const ix = invaderX(inv), iy = invaderY(inv);
+        if (b.x > ix - INV_W / 2 && b.x < ix + INV_W / 2 &&
+            b.y > iy - INV_H / 2 && b.y < iy + INV_H / 2) {
+          inv.alive = false;
+          const pts = ROW_PTS[inv.row];
+          score += pts;
+          addFloat(ix, iy, `+${pts}`, '#c8f');
+          addParticles(ix, iy, 8, '#c8f');
+          bullets.splice(bi, 1);
+          recalcSpeed();
+          if (score > hiScore) { hiScore = score; localStorage.setItem('sinvaders_hi', hiScore); }
+          updateHUD();
+          if (aliveCount() === 0) {
+            state = 'levelclear'; levelClearTimer = 2.2;
+            addParticles(W / 2, H / 2, 30, '#c8f');
+            return;
+          }
+          continue outer;
+        }
+      }
+    }
+
+    // Bullet vs shield
+    bullets = bullets.filter(b => !hitShield(b.x, b.y, 4, true));
+
+    // Invader bullet vs shield
+    invBullets = invBullets.filter(b => !hitShield(b.x, b.y, 4, true));
+
+    // Invader bullet vs player
+    if (p.invincible <= 0) {
+      for (const b of invBullets) {
+        if (Math.hypot(b.x - p.x, b.y - PLAYER_Y) < 16) {
+          killPlayer(); return;
+        }
+      }
+    }
+
+    // Invader reaches player zone
+    for (const inv of invaders) {
+      if (inv.alive && invaderY(inv) >= PLAYER_Y - 10) {
+        killPlayer(); return;
+      }
+    }
+
+    // Particles & floats
+    particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+    particles = particles.filter(p => p.life > 0);
+    floats.forEach(f => { f.y -= 40 * dt; f.life -= dt; });
+    floats = floats.filter(f => f.life > 0);
+
+    updateHUD();
+  }
+
+  // Grid offset based on remaining invaders and step direction
+  let gridOffX = 0, gridOffY = 0;
+
+  function stepInvaders() {
+    const alive = invaders.filter(i => i.alive);
+    if (!alive.length) return;
+
+    // Toggle animation frame
+    for (const inv of alive) inv.frame ^= 1;
+
+    if (stepDrop) {
+      gridOffY += 18;
+      stepDir  *= -1;
+      stepDrop  = false;
+      return;
+    }
+
+    const step = 14;
+    const next = gridOffX + stepDir * step;
+    const minC = Math.min(...alive.map(i => i.col));
+    const maxC = Math.max(...alive.map(i => i.col));
+    const leftEdge  = GRID_X0 + next + minC * (INV_W + INV_GAP_X);
+    const rightEdge = GRID_X0 + next + maxC * (INV_W + INV_GAP_X) + INV_W;
+
+    if (leftEdge < 8 || rightEdge > W - 8) {
+      stepDrop = true;
+    } else {
+      gridOffX = next;
+    }
+  }
+
+  function invaderX(inv) {
+    return GRID_X0 + gridOffX + inv.col * (INV_W + INV_GAP_X) + INV_W / 2;
+  }
+  function invaderY(inv) {
+    return GRID_Y0 + gridOffY + inv.row * (INV_H + INV_GAP_Y) + INV_H / 2;
+  }
+
+  function recalcSpeed() {
+    const n = aliveCount();
+    const total = COLS * ROWS_INV;
+    const t = 1 - n / total;
+    stepInterval = Math.max(STEP_MIN, STEP_BASE * (1 - t * 0.92) - (level - 1) * 0.06);
+  }
+
+  let invShootTimer = 0;
+  const INV_SHOOT_BASE = 1.4;
+
+  function invaderShoot(dt) {
+    invShootTimer -= dt;
+    if (invShootTimer > 0) return;
+    invShootTimer = Math.max(0.3, INV_SHOOT_BASE - (level - 1) * 0.1) * (0.5 + Math.random());
+
+    // Pick a random invader in the bottom-most occupied column
+    const alive = invaders.filter(i => i.alive);
+    if (!alive.length) return;
+    const cols = [...new Set(alive.map(i => i.col))];
+    const col  = cols[Math.floor(Math.random() * cols.length)];
+    const shooters = alive.filter(i => i.col === col);
+    const shooter  = shooters.reduce((a, b) => a.row > b.row ? a : b);
+    invBullets.push({
+      x:  invaderX(shooter),
+      y:  invaderY(shooter) + INV_H / 2,
+      vy: 200 + level * 15,
+    });
+  }
+
+  function hitShield(bx, by, radius, destroy) {
+    for (const sh of shields) {
+      if (bx < sh.x || bx > sh.x + sh.w || by < sh.y || by > sh.y + sh.h) continue;
+      const px = Math.floor(bx - sh.x), py = Math.floor(by - sh.y);
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const nx = px + dx, ny = py + dy;
+          if (nx < 0 || nx >= sh.w || ny < 0 || ny >= sh.h) continue;
+          if (sh.pixels[ny][nx]) {
+            if (destroy) {
+              // Crater: destroy pixels within radius
+              for (let ey = -radius; ey <= radius; ey++)
+                for (let ex = -radius; ex <= radius; ex++) {
+                  if (ex*ex + ey*ey <= radius*radius) {
+                    const cx = px + ex, cy2 = py + ey;
+                    if (cx >= 0 && cx < sh.w && cy2 >= 0 && cy2 < sh.h)
+                      sh.pixels[cy2][cx] = 0;
+                  }
+                }
+            }
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // Invaders erode shields as they pass over them
+  function erodeShields() {
+    for (const inv of invaders) {
+      if (!inv.alive) continue;
+      const iy = invaderY(inv);
+      for (const sh of shields) {
+        if (iy + INV_H / 2 < sh.y || iy - INV_H / 2 > sh.y + sh.h) continue;
+        const ix = invaderX(inv);
+        if (ix + INV_W / 2 < sh.x || ix - INV_W / 2 > sh.x + sh.w) continue;
+        // Erode top row of shield under invader
+        for (let py = 0; py < 6; py++)
+          for (let px = 0; px < sh.w; px++)
+            if (sh.pixels[py][px]) sh.pixels[py][px] = 0;
+      }
+    }
+  }
+
+  function updateSaucer(dt) {
+    if (!saucer) {
+      saucerTimer -= dt;
+      if (saucerTimer <= 0) {
+        const fromLeft = Math.random() < 0.5;
+        saucer = { x: fromLeft ? -30 : W + 30, vx: fromLeft ? SAUCER_SPD : -SAUCER_SPD };
+        saucerTimer = 22 + Math.random() * 18;
+      }
+      return;
+    }
+    saucer.x += saucer.vx * dt;
+    if (saucer.x < -40 || saucer.x > W + 40) { saucer = null; return; }
+
+    // Player bullet vs saucer
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      if (Math.hypot(bullets[bi].x - saucer.x, bullets[bi].y - 28) < 20) {
+        const pts = SAUCER_PTS[Math.floor(Math.random() * SAUCER_PTS.length)];
+        score += pts;
+        addFloat(saucer.x, 28, `+${pts}`, '#f6a');
+        addParticles(saucer.x, 28, 12, '#f6a');
+        if (score > hiScore) { hiScore = score; localStorage.setItem('sinvaders_hi', hiScore); }
+        updateHUD();
+        saucer = null; bullets.splice(bi, 1); return;
+      }
+    }
+  }
+
+  function killPlayer() {
+    addParticles(player.x, PLAYER_Y, 14, '#0f8');
+    lives--;
+    if (score > hiScore) { hiScore = score; localStorage.setItem('sinvaders_hi', hiScore); }
+    state = lives > 0 ? 'dead' : 'gameover';
+    updateHUD();
+  }
+
+  function addParticles(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = 40 + Math.random() * 100;
+      particles.push({ x, y, vx: Math.cos(a)*v, vy: Math.sin(a)*v, color, life: 0.3 + Math.random()*0.3, size: 1.5 + Math.random()*2 });
+    }
+  }
+
+  function addFloat(x, y, text, color) {
+    floats.push({ x, y, text, color, life: 0.9 });
+  }
+
+  function updateHUD() {
+    document.getElementById('sv').textContent  = score;
+    document.getElementById('lv').textContent  = level;
+    document.getElementById('hv').textContent  = hiScore;
+    document.getElementById('liv').textContent = '▲'.repeat(Math.max(0, lives)) || '—';
+  }
+
+  // ── Draw ───────────────────────────────────────────────────
+
+  // Invader shapes: each type has 2 animation frames, defined as 11x8 pixel grids
+  // 1 = lit pixel, each cell is 3x3 px scaled to INV_W/INV_H
+  const SHAPES = [
+    // Squid (type 0) — 2 frames
+    [
+      [[0,0,0,1,1,1,1,1,0,0,0],
+       [0,1,1,1,1,1,1,1,1,1,0],
+       [1,1,0,1,1,1,1,1,0,1,1],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [0,1,1,0,0,0,0,0,1,1,0],
+       [0,0,1,1,0,0,0,1,1,0,0],
+       [0,1,0,1,0,0,0,1,0,1,0],
+       [0,0,1,0,0,0,0,0,1,0,0]],
+      [[0,0,0,1,1,1,1,1,0,0,0],
+       [0,1,1,1,1,1,1,1,1,1,0],
+       [1,1,0,1,1,1,1,1,0,1,1],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [0,0,1,0,0,0,0,0,1,0,0],
+       [0,1,1,1,0,0,0,1,1,1,0],
+       [1,1,0,0,0,0,0,0,0,1,1],
+       [0,0,0,0,0,0,0,0,0,0,0]],
+    ],
+    // Crab (type 1) — 2 frames
+    [
+      [[0,0,1,0,0,0,0,0,1,0,0],
+       [1,0,0,1,0,0,0,1,0,0,1],
+       [1,0,1,1,1,1,1,1,1,0,1],
+       [1,1,1,0,1,1,1,0,1,1,1],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [0,1,1,1,1,1,1,1,1,1,0],
+       [0,0,1,0,0,0,0,0,1,0,0],
+       [0,1,0,0,0,0,0,0,0,1,0]],
+      [[0,0,1,0,0,0,0,0,1,0,0],
+       [0,0,0,1,0,0,0,1,0,0,0],
+       [0,0,1,1,1,1,1,1,1,0,0],
+       [0,1,1,0,1,1,1,0,1,1,0],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [1,0,1,0,0,0,0,0,1,0,1],
+       [0,1,0,0,0,0,0,0,0,1,0]],
+    ],
+    // Octopus (type 2) — 2 frames
+    [
+      [[0,0,0,0,1,1,1,1,0,0,0,0].slice(1),
+       [0,1,1,1,1,1,1,1,1,1,0,0].slice(1),
+       [1,1,0,1,1,1,1,1,0,1,1,0].slice(1),
+       [1,1,1,1,1,1,1,1,1,1,1,0].slice(1),
+       [0,1,1,0,0,0,0,0,1,1,0,0].slice(1),
+       [0,0,1,1,0,1,1,0,1,1,0,0].slice(1),
+       [0,1,0,0,1,0,0,1,0,0,1,0].slice(1),
+       [0,0,1,0,0,0,0,0,0,1,0,0].slice(1)],
+      [[0,0,0,1,1,1,1,0,0,0,0,0].slice(1),
+       [1,1,1,1,1,1,1,1,1,1,0,0].slice(1),
+       [1,0,1,1,1,1,1,1,1,0,1,0].slice(1),
+       [1,1,1,1,1,1,1,1,1,1,1,0].slice(1),
+       [0,1,1,0,0,0,0,0,1,1,0,0].slice(1),
+       [0,1,0,1,0,1,1,0,1,0,1,0].slice(1),
+       [0,0,0,1,0,0,0,1,0,0,0,0].slice(1),
+       [0,0,1,0,0,0,0,0,1,0,0,0].slice(1)],
+    ],
+  ];
+
+  function drawInvader(type, frame, cx, cy) {
+    const grid = SHAPES[type][frame];
+    const rows = grid.length, cols = grid[0].length;
+    const pw = INV_W / cols, ph = INV_H / rows;
+    const colors = ['#c8f', '#8cf', '#fc8'];
+    ctx.fillStyle = colors[type];
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++)
+        if (grid[r][c])
+          ctx.fillRect(cx - INV_W/2 + c * pw, cy - INV_H/2 + r * ph, pw - 0.5, ph - 0.5);
+  }
+
+  function draw() {
+    ctx.fillStyle = '#030206';
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars
+    ctx.fillStyle = 'rgba(180,160,220,0.45)';
+    for (let i = 0; i < 55; i++) {
+      const sx = ((i * 193 + 67)  % 591);
+      const sy = ((i * 317 + 131) % 583);
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+
+    // Ground line
+    ctx.strokeStyle = '#3a2050';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H - 28); ctx.lineTo(W, H - 28); ctx.stroke();
+
+    // Shields
+    for (const sh of (shields || [])) {
+      ctx.fillStyle = '#0f8';
+      for (let py = 0; py < sh.h; py++)
+        for (let px = 0; px < sh.w; px++)
+          if (sh.pixels[py][px])
+            ctx.fillRect(sh.x + px, sh.y + py, 1, 1);
+    }
+
+    // Invaders
+    for (const inv of (invaders || [])) {
+      if (!inv.alive) continue;
+      drawInvader(inv.type, inv.frame, invaderX(inv), invaderY(inv));
+    }
+
+    // Saucer
+    if (saucer) {
+      ctx.fillStyle = '#f6a';
+      ctx.beginPath(); ctx.ellipse(saucer.x, 28, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fcc';
+      ctx.beginPath(); ctx.ellipse(saucer.x, 22, 10, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c84';
+      for (let i = -1; i <= 1; i++)
+        ctx.fillRect(saucer.x + i * 8 - 2, 30, 4, 4);
+    }
+
+    // Player bullets
+    ctx.fillStyle = '#ff0';
+    for (const b of (bullets || []))
+      ctx.fillRect(b.x - 2, b.y - 8, 4, 12);
+
+    // Invader bullets
+    ctx.fillStyle = '#f84';
+    for (const b of (invBullets || [])) {
+      ctx.fillRect(b.x - 1.5, b.y - 6, 3, 8);
+    }
+
+    // Player
+    if (player && state !== 'gameover') {
+      const show = player.invincible <= 0 || Math.floor(player.invincible * 8) % 2 === 0;
+      if (show) {
+        const px = player.x;
+        ctx.fillStyle = '#0f8';
+        // Cannon base
+        ctx.fillRect(px - 16, PLAYER_Y - 4, 32, 10);
+        // Body
+        ctx.fillRect(px - 10, PLAYER_Y - 14, 20, 12);
+        // Barrel
+        ctx.fillRect(px - 3, PLAYER_Y - 22, 6, 10);
+      }
+    }
+
+    // Particles
+    for (const p of (particles || [])) {
+      ctx.globalAlpha = Math.min(p.life * 4, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Floating score texts
+    ctx.font = 'bold 13px "Courier New"';
+    ctx.textAlign = 'center';
+    for (const f of (floats || [])) {
+      ctx.globalAlpha = Math.min(f.life * 3, 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+
+    // Overlays
+    if (state === 'title') {
+      overlay(0.68);
+      big('SPACE INVADERS', '#c8f', 195);
+      small('PRESS SPACE TO START', '#9a9', 258);
+      small('ARROW KEYS / A D  ·  SPACE TO FIRE  ·  P PAUSE', '#3a2050', 296);
+      if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#554', 334);
+    }
+    if (state === 'gameover') {
+      overlay(0.72);
+      big('GAME OVER', '#e33', 205);
+      small(`SCORE  ${score}`, '#c8f', 265);
+      small(`HI SCORE  ${hiScore}`, '#9a9', 298);
+      small('PRESS SPACE TO PLAY AGAIN', '#9a9', 338);
+    }
+    if (state === 'dead') {
+      overlay(0.42);
+      big('CANNON HIT', '#f84', 215);
+      small(`LIVES REMAINING  ${'▲'.repeat(lives)}`, '#0f8', 272);
+      small('PRESS SPACE TO CONTINUE', '#9a9', 308);
+    }
+    if (state === 'levelclear') {
+      overlay(0.38);
+      big(`WAVE ${level}`, '#c8f', 218);
+      big('CLEARED!', '#ff8', 268);
+      small('+1000 BONUS', '#fa0', 316);
+    }
+    if (state === 'paused') {
+      overlay(0.52);
+      big('PAUSED', '#ff0', 248);
+      small('P  TO RESUME', '#aa0', 302);
+    }
+  }
+
+  function overlay(a) {
+    ctx.fillStyle = `rgba(0,0,0,${a})`; ctx.fillRect(0, 0, W, H);
+  }
+  function big(t, color, y) {
+    ctx.fillStyle = color; ctx.font = 'bold 48px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, W / 2, y);
+  }
+  function small(t, color, y) {
+    ctx.fillStyle = color; ctx.font = '15px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, W / 2, y);
+  }
+
+  // ── Main loop ──────────────────────────────────────────────
+  function frame(ts) {
+    const dt = Math.min((ts - prevTs) / 1000, 0.05);
+    prevTs = ts;
+
+    if (state === 'playing') {
+      update(dt);
+      erodeShields();
+    } else if (state === 'levelclear') {
+      levelClearTimer -= dt;
+      particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+      particles = particles.filter(p => p.life > 0);
+      floats.forEach(f => { f.y -= 40 * dt; f.life -= dt; });
+      floats = floats.filter(f => f.life > 0);
+      if (levelClearTimer <= 0) {
+        level++;
+        score += 1000;
+        buildLevel();
+        state = 'playing';
+      }
+    }
+
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  updateHUD();
+  draw();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
