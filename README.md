@@ -1,6 +1,10 @@
 # Arcade Games
 
-Four classic arcade games that run entirely in the browser — no installation or server required. Open any HTML file directly in any web browser.
+Four classic arcade games that run entirely in the browser — no installation or server required.
+
+## Getting Started
+
+Open `index.html` in any web browser to launch the arcade. From there, select any game to play.
 
 ---
 
@@ -8,16 +12,13 @@ Four classic arcade games that run entirely in the browser — no installation o
 
 A two-player Tic Tac Toe game for two people on the same device.
 
-**File:** `tic-tac-toe.html`
-
 ### How to Play
 
-1. Open `tic-tac-toe.html` in any web browser.
-2. Players take turns clicking cells on the 3×3 grid.
-3. **Player X** always goes first.
-4. The first player to get three marks in a row (horizontally, vertically, or diagonally) wins.
-5. If all 9 cells are filled with no winner, the game is a draw.
-6. Click **New Game** to reset the board. Scores carry over between rounds.
+1. Players take turns clicking cells on the 3×3 grid.
+2. **Player X** always goes first.
+3. The first player to get three marks in a row (horizontally, vertically, or diagonally) wins.
+4. If all 9 cells are filled with no winner, the game is a draw.
+5. Click **New Game** to reset the board. Scores carry over between rounds.
 
 ### Features
 
@@ -32,13 +33,10 @@ A two-player Tic Tac Toe game for two people on the same device.
 
 A browser remake of the classic Atari arcade game. Destroy the centipede before it reaches you.
 
-**File:** `centipede.html`
-
 ### How to Play
 
-1. Open `centipede.html` in any web browser.
-2. Move your cannon around the player zone (bottom of the screen) and shoot the centipede.
-3. Hit every segment to clear the level and advance.
+1. Move your cannon around the player zone (bottom of the screen) and shoot the centipede.
+2. Hit every segment to clear the level and advance.
 
 ### Controls
 
@@ -70,19 +68,14 @@ A browser remake of the classic Atari arcade game. Destroy the centipede before 
 
 ---
 
----
-
 ## Asteroids
 
 A browser remake of the classic Atari vector-graphics arcade game. Pilot your ship through an asteroid field and survive as long as possible.
 
-**File:** `asteroids.html`
-
 ### How to Play
 
-1. Open `asteroids.html` in any web browser.
-2. Rotate your ship and thrust to navigate. Shoot all the asteroids to clear each level.
-3. Large asteroids split into smaller ones when hit — finish them off completely.
+1. Rotate your ship and thrust to navigate. Shoot all the asteroids to clear each level.
+2. Large asteroids split into smaller ones when hit — finish them off completely.
 
 ### Controls
 
@@ -122,13 +115,10 @@ A browser remake of the classic Atari vector-graphics arcade game. Pilot your sh
 
 A browser remake of the classic Taito arcade game. Defend Earth from waves of descending alien invaders.
 
-**File:** `space-invaders.html`
-
 ### How to Play
 
-1. Open `space-invaders.html` in any web browser.
-2. Move your cannon left and right and shoot the invaders before they reach the ground.
-3. Use the shields for cover — but they degrade with each hit.
+1. Move your cannon left and right and shoot the invaders before they reach the ground.
+2. Use the shields for cover — but they degrade with each hit.
 
 ### Controls
 
@@ -177,6 +167,7 @@ All games are built with plain HTML, CSS, and vanilla JavaScript — no framewor
 
 ```
 arcade-games/
+├── index.html            # Arcade launcher — start here
 ├── tic-tac-toe.html      # Two-player Tic Tac Toe
 ├── centipede.html        # Single-player Centipede arcade game
 ├── asteroids.html        # Single-player Asteroids arcade game
