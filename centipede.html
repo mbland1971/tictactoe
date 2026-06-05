@@ -54,7 +54,7 @@
   // ── State ──────────────────────────────────────────────────
   let state = 'title';
   let score, hiScore, lives, level;
-  let mushrooms;
+  let mushrooms = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
   let trains;
   let player;
   let bullets, sparks, floats;

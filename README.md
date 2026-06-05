@@ -1,6 +1,6 @@
 # Arcade Games
 
-Two classic arcade games that run entirely in the browser — no installation or server required. Open either HTML file directly in any web browser.
+Three classic arcade games that run entirely in the browser — no installation or server required. Open any HTML file directly in any web browser.
 
 ---
 
@@ -70,6 +70,54 @@ A browser remake of the classic Atari arcade game. Destroy the centipede before 
 
 ---
 
+---
+
+## Asteroids
+
+A browser remake of the classic Atari vector-graphics arcade game. Pilot your ship through an asteroid field and survive as long as possible.
+
+**File:** `asteroids.html`
+
+### How to Play
+
+1. Open `asteroids.html` in any web browser.
+2. Rotate your ship and thrust to navigate. Shoot all the asteroids to clear each level.
+3. Large asteroids split into smaller ones when hit — finish them off completely.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Arrow Left / A | Rotate left |
+| Arrow Right / D | Rotate right |
+| Arrow Up / W | Thrust |
+| Space | Fire |
+| P | Pause / Unpause |
+
+### Rules
+
+- **Large asteroids** split into 2 medium ones when shot.
+- **Medium asteroids** split into 2 small ones when shot.
+- **Small asteroids** are destroyed outright.
+- Clear all asteroids to advance to the next level — more asteroids spawn each level.
+- A **UFO** occasionally flies across the screen and shoots at you. Destroy it for bonus points.
+- Crashing into an asteroid or UFO (or being hit by a UFO bullet) costs a life.
+- You start with **3 lives**. The game ends when all lives are lost.
+- Your ship wraps around the screen edges.
+- Your high score is saved for the session.
+
+### Scoring
+
+| Event | Points |
+|-------|--------|
+| Destroy large asteroid | 20 |
+| Destroy medium asteroid | 50 |
+| Destroy small asteroid | 100 |
+| Destroy UFO | 200 |
+| Clear a level | 1,000 bonus |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -79,12 +127,13 @@ All games are built with plain HTML, CSS, and vanilla JavaScript — no framewor
 | Structure | HTML5 |
 | Styling | CSS3 |
 | Logic | Vanilla JavaScript |
-| Rendering (Centipede) | HTML5 Canvas 2D |
+| Rendering (Centipede, Asteroids) | HTML5 Canvas 2D |
 
 ## File Structure
 
 ```
 arcade-games/
 ├── tic-tac-toe.html    # Two-player Tic Tac Toe
-└── centipede.html      # Single-player Centipede arcade game
+├── centipede.html      # Single-player Centipede arcade game
+└── asteroids.html      # Single-player Asteroids arcade game
 ```
