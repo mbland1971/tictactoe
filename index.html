@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARCADE</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --yellow: #ffe600;
+      --green:  #00ff88;
+      --cyan:   #00e5ff;
+      --purple: #cc44ff;
+      --pink:   #ff2d78;
+      --dark:   #030208;
+      --card:   rgba(6, 4, 18, 0.9);
+    }
+
+    html, body { min-height: 100%; }
+    body {
+      background: var(--dark);
+      color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      overflow-x: hidden;
+    }
+
+    /* ── Background canvas ── */
+    #bg { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; }
+
+    /* ── CRT overlay ── */
+    .scanlines {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px
+      );
+    }
+    .vignette {
+      position: fixed; inset: 0; z-index: 2; pointer-events: none;
+      background: radial-gradient(ellipse at 50% 38%, transparent 48%, rgba(0,0,0,0.78) 100%);
+    }
+
+    /* ── Layout ── */
+    .wrap {
+      position: relative; z-index: 10;
+      max-width: 1080px; margin: 0 auto;
+      padding: 0 20px 60px;
+    }
+
+    /* ── Header ── */
+    header { text-align: center; padding: 44px 0 30px; }
+
+    .hdr-meta {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; letter-spacing: 3px; color: rgba(255,255,255,0.25);
+      margin-bottom: 18px;
+    }
+    .hdr-meta .hi-val { color: var(--yellow); }
+
+    .title {
+      font-size: clamp(54px, 13vw, 110px);
+      font-weight: bold; letter-spacing: 16px; text-transform: uppercase;
+      color: #fff; line-height: 1; margin-bottom: 16px;
+      animation: titleCycle 6s ease-in-out infinite alternate,
+                 glitch 9s linear infinite;
+    }
+
+    @keyframes titleCycle {
+      0%   { text-shadow: 0 0 12px var(--cyan),   0 0 28px var(--cyan),   0 0 55px rgba(0,229,255,.4); }
+      50%  { text-shadow: 0 0 12px var(--purple),  0 0 28px var(--purple),  0 0 55px rgba(204,68,255,.4); }
+      100% { text-shadow: 0 0 12px var(--green),   0 0 28px var(--green),   0 0 55px rgba(0,255,136,.4); }
+    }
+    @keyframes glitch {
+      0%,88%,100% { transform: none; filter: none; }
+      89% { transform: skewX(-3deg) translateX(-2px); filter: hue-rotate(80deg); }
+      90% { transform: skewX(2deg)  translateX(2px);  filter: hue-rotate(-55deg); }
+      91% { transform: none; filter: none; }
+    }
+
+    .tagline {
+      font-size: 13px; letter-spacing: 6px; color: var(--yellow);
+      animation: blink 1.3s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid; grid-template-columns: repeat(2, 1fr);
+      gap: 22px; margin-bottom: 44px;
+    }
+    @media (max-width: 660px) { .grid { grid-template-columns: 1fr; } }
+
+    /* ── Card ── */
+    .card {
+      display: block; text-decoration: none; color: inherit;
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 3px; padding: 24px 22px 22px;
+      position: relative; overflow: hidden;
+      transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+    }
+    /* shimmer on inner face */
+    .card::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: linear-gradient(135deg, rgba(255,255,255,.03) 0%, transparent 55%);
+    }
+    /* top accent bar */
+    .card::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--ac);
+      box-shadow: 0 0 10px var(--ac), 0 0 20px var(--ac);
+      transition: box-shadow .22s ease;
+    }
+    .card-ttt  { --ac: var(--yellow); }
+    .card-cent { --ac: var(--green);  }
+    .card-ast  { --ac: var(--cyan);   }
+    .card-si   { --ac: var(--purple); }
+
+    .card:hover { transform: translateY(-5px) scale(1.015); border-color: rgba(255,255,255,.14); }
+    .card-ttt:hover  { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(255,230,0,.22); }
+    .card-cent:hover { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(0,255,136,.22); }
+    .card-ast:hover  { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(0,229,255,.22); }
+    .card-si:hover   { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(204,68,255,.22); }
+    .card:hover::after { box-shadow: 0 0 18px var(--ac), 0 0 36px var(--ac); }
+
+    /* ── Preview ── */
+    .preview {
+      height: 90px; display: flex; align-items: center; justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    /* ── Card text ── */
+    .card-num  { font-size: 10px; letter-spacing: 3px; color: rgba(255,255,255,.22); margin-bottom: 5px; }
+    .card-name {
+      font-size: 20px; font-weight: bold; letter-spacing: 3px; text-transform: uppercase;
+      color: var(--ac); text-shadow: 0 0 10px var(--ac); margin-bottom: 8px;
+    }
+    .card-desc { font-size: 11.5px; line-height: 1.75; color: rgba(255,255,255,.48); margin-bottom: 14px; }
+
+    .controls  { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 18px; }
+    .key {
+      background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 2px; padding: 3px 7px;
+      font-size: 10px; letter-spacing: 1px; color: rgba(255,255,255,.55); white-space: nowrap;
+    }
+    .key em { color: rgba(255,255,255,.28); font-style: normal; }
+
+    /* ── Play button ── */
+    .play {
+      display: block; width: 100%; padding: 11px 0;
+      border: 1px solid var(--ac); border-radius: 2px;
+      color: var(--ac); font-family: inherit; font-size: 12px;
+      font-weight: bold; letter-spacing: 5px; text-transform: uppercase; text-align: center;
+      transition: background .18s, color .18s, box-shadow .18s;
+    }
+    .card-ttt  .play { animation: pulY 2.4s ease-in-out infinite; }
+    .card-cent .play { animation: pulG 2.4s ease-in-out infinite; }
+    .card-ast  .play { animation: pulC 2.4s ease-in-out infinite; }
+    .card-si   .play { animation: pulP 2.4s ease-in-out infinite; }
+
+    @keyframes pulY { 0%,100%{box-shadow:0 0 5px rgba(255,230,0,.2)}  50%{box-shadow:0 0 14px rgba(255,230,0,.55)} }
+    @keyframes pulG { 0%,100%{box-shadow:0 0 5px rgba(0,255,136,.2)}  50%{box-shadow:0 0 14px rgba(0,255,136,.55)} }
+    @keyframes pulC { 0%,100%{box-shadow:0 0 5px rgba(0,229,255,.2)}  50%{box-shadow:0 0 14px rgba(0,229,255,.55)} }
+    @keyframes pulP { 0%,100%{box-shadow:0 0 5px rgba(204,68,255,.2)} 50%{box-shadow:0 0 14px rgba(204,68,255,.55)} }
+
+    .card-ttt:hover  .play { background:var(--yellow); color:#000; box-shadow:0 0 24px var(--yellow); animation:none; }
+    .card-cent:hover .play { background:var(--green);  color:#000; box-shadow:0 0 24px var(--green);  animation:none; }
+    .card-ast:hover  .play { background:var(--cyan);   color:#000; box-shadow:0 0 24px var(--cyan);   animation:none; }
+    .card-si:hover   .play { background:var(--purple); color:#000; box-shadow:0 0 24px var(--purple); animation:none; }
+
+    /* ── Marquee ── */
+    .marquee-wrap { border-top: 1px solid rgba(255,255,255,.07); padding: 12px 0; overflow: hidden; }
+    .marquee-inner { display: flex; white-space: nowrap; animation: ticker 32s linear infinite; }
+    .marquee-inner span { font-size: 11px; letter-spacing: 3px; color: rgba(255,255,255,.18); padding-right: 48px; }
+    @keyframes ticker { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+
+    /* ── Pixel particles ── */
+    .px-p {
+      position: fixed; pointer-events: none; z-index: 50;
+      width: 3px; height: 3px; opacity: 0;
+      animation: pxRise linear forwards;
+    }
+    @keyframes pxRise {
+      0%  { opacity:0;   transform: translateY(0)     translateX(0); }
+      15% { opacity:1; }
+      85% { opacity:.4; }
+      100%{ opacity:0;   transform: translateY(-72px) translateX(var(--dx)); }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<div class="wrap">
+  <header>
+    <div class="hdr-meta">
+      <span>1UP &nbsp;HI-SCORE</span>
+      <span class="hi-val" id="hiscore">000000</span>
+      <span>CREDIT &nbsp;<span id="credit">00</span></span>
+    </div>
+    <h1 class="title">ARCADE</h1>
+    <p class="tagline">— INSERT COIN TO PLAY —</p>
+  </header>
+
+  <main class="grid">
+
+    <!-- TIC TAC TOE -->
+    <a class="card card-ttt" href="tic-tac-toe.html">
+      <div class="preview">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+          <line x1="40" y1="6"  x2="40" y2="82" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
+          <line x1="80" y1="6"  x2="80" y2="82" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
+          <line x1="6"  y1="32" x2="114" y2="32" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
+          <line x1="6"  y1="58" x2="114" y2="58" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
+          <!-- X marks -->
+          <line x1="13" y1="12" x2="30" y2="28" stroke="#ff2d78" stroke-width="2.8" stroke-linecap="round"/>
+          <line x1="30" y1="12" x2="13" y2="28" stroke="#ff2d78" stroke-width="2.8" stroke-linecap="round"/>
+          <line x1="87" y1="12" x2="104" y2="28" stroke="#ff2d78" stroke-width="2.8" stroke-linecap="round"/>
+          <line x1="104" y1="12" x2="87" y2="28" stroke="#ff2d78" stroke-width="2.8" stroke-linecap="round"/>
+          <line x1="54" y1="38" x2="69" y2="53" stroke="#ff2d78" stroke-width="2.8" stroke-linecap="round"/>
+          <line x1="69" y1="38" x2="54" y2="53" stroke="#ff2d78" stroke-width="2.8" stroke-linecap="round"/>
+          <!-- O marks -->
+          <circle cx="60"  cy="20" r="8.5" fill="none" stroke="#00e5ff" stroke-width="2.5"/>
+          <circle cx="21"  cy="45" r="8.5" fill="none" stroke="#00e5ff" stroke-width="2.5"/>
+          <circle cx="100" cy="45" r="8.5" fill="none" stroke="#00e5ff" stroke-width="2.5"/>
+          <circle cx="21"  cy="70" r="8.5" fill="none" stroke="#00e5ff" stroke-width="2.5" opacity=".3"/>
+          <circle cx="60"  cy="70" r="8.5" fill="none" stroke="#00e5ff" stroke-width="2.5" opacity=".3"/>
+          <!-- winning diagonal -->
+          <line x1="13" y1="12" x2="104" y2="28" stroke="#ffe600" stroke-width="1.8" opacity=".7" stroke-dasharray="5,4">
+            <animate attributeName="stroke-dashoffset" from="0" to="-18" dur="1.2s" repeatCount="indefinite"/>
+          </line>
+        </svg>
+      </div>
+      <div class="card-num">GAME 01 / 04</div>
+      <div class="card-name">Tic Tac Toe</div>
+      <div class="card-desc">Two players battle for the 3×3 grid. Outsmart your opponent and claim three in a row to win.</div>
+      <div class="controls">
+        <span class="key">CLICK <em>— Place mark</em></span>
+        <span class="key">2 PLAYERS</span>
+      </div>
+      <div class="play">▶ &nbsp;PLAY</div>
+    </a>
+
+    <!-- CENTIPEDE -->
+    <a class="card card-cent" href="centipede.html">
+      <div class="preview">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+          <!-- mushrooms -->
+          <circle cx="18" cy="64" r="5" fill="#245c24" opacity=".8"/>
+          <circle cx="42" cy="52" r="5" fill="#317631" opacity=".8"/>
+          <circle cx="72" cy="58" r="5" fill="#245c24" opacity=".8"/>
+          <circle cx="96" cy="48" r="5" fill="#317631" opacity=".8"/>
+          <circle cx="30" cy="38" r="4" fill="#245c24" opacity=".7"/>
+          <circle cx="84" cy="30" r="4" fill="#317631" opacity=".7"/>
+          <circle cx="56" cy="44" r="4" fill="#245c24" opacity=".7"/>
+          <!-- centipede: head + segments with march animation -->
+          <g>
+            <circle cx="8"  cy="10" r="7"   fill="#d94"/>
+            <circle cx="8"  cy="10" r="5"   fill="none" stroke="#a63" stroke-width="1"/>
+            <circle cx="6"  cy="8.5" r="1.8" fill="#fff"/>
+            <circle cx="10" cy="8.5" r="1.8" fill="#fff"/>
+            <circle cx="6.6" cy="8.5" r=".9" fill="#111"/>
+            <circle cx="10.6" cy="8.5" r=".9" fill="#111"/>
+          </g>
+          <g>
+            <circle cx="24"  cy="10" r="6" fill="#b73"/>
+            <circle cx="24"  cy="10" r="4.5" fill="none" stroke="#823" stroke-width="1"/>
+            <circle cx="40"  cy="10" r="6" fill="#b73"/>
+            <circle cx="40"  cy="10" r="4.5" fill="none" stroke="#823" stroke-width="1"/>
+            <circle cx="56"  cy="10" r="6" fill="#b73"/>
+            <circle cx="72"  cy="10" r="6" fill="#b73"/>
+            <circle cx="88"  cy="10" r="6" fill="#b73"/>
+            <circle cx="104" cy="10" r="6" fill="#b73"/>
+            <animateTransform attributeName="transform" type="translate"
+              values="0,0;4,0;4,0;0,0;-4,0;-4,0;0,0" dur="1.1s" calcMode="discrete" repeatCount="indefinite"/>
+          </g>
+          <!-- cannon -->
+          <polygon points="60,84 51,74 69,74" fill="#0f0"/>
+          <rect x="58" y="66" width="4" height="10" fill="#0f0"/>
+          <!-- bullet -->
+          <rect x="59.5" y="42" width="2" height="10" fill="#ff0">
+            <animate attributeName="y" values="60;10;60" dur="0.85s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="1;1;0" dur="0.85s" repeatCount="indefinite"/>
+          </rect>
+        </svg>
+      </div>
+      <div class="card-num">GAME 02 / 04</div>
+      <div class="card-name">Centipede</div>
+      <div class="card-desc">A relentless centipede winds through the mushroom field toward your cannon. Blast every segment.</div>
+      <div class="controls">
+        <span class="key">WASD / ARROWS <em>— Move</em></span>
+        <span class="key">SPACE <em>— Fire</em></span>
+        <span class="key">P <em>— Pause</em></span>
+      </div>
+      <div class="play">▶ &nbsp;PLAY</div>
+    </a>
+
+    <!-- ASTEROIDS -->
+    <a class="card card-ast" href="asteroids.html">
+      <div class="preview">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+          <!-- stars -->
+          <circle cx="10"  cy="10"  r="1"   fill="#fff" opacity=".5"/>
+          <circle cx="108" cy="16"  r="1"   fill="#fff" opacity=".55"/>
+          <circle cx="18"  cy="76"  r="1"   fill="#fff" opacity=".5"/>
+          <circle cx="100" cy="74"  r="1.2" fill="#fff" opacity=".6"/>
+          <circle cx="62"  cy="82"  r=".8"  fill="#fff" opacity=".4"/>
+          <!-- spinning asteroid 1 -->
+          <g transform="translate(26,24)">
+            <polygon points="-14,-4 -9,-12 1,-14 10,-9 13,1 9,10 0,13 -9,7" fill="none" stroke="#6af" stroke-width="1.5"/>
+            <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="7s" additive="sum" repeatCount="indefinite"/>
+          </g>
+          <!-- spinning asteroid 2 -->
+          <g transform="translate(92,18)">
+            <polygon points="-10,-3 -6,-10 3,-11 10,-6 10,3 6,9 -3,10 -9,5" fill="none" stroke="#6af" stroke-width="1.5"/>
+            <animateTransform attributeName="transform" type="rotate" from="0" to="-360" dur="11s" additive="sum" repeatCount="indefinite"/>
+          </g>
+          <!-- spinning asteroid 3 -->
+          <g transform="translate(16,56)">
+            <polygon points="-8,-2 -4,-8 4,-8 8,-2 6,6 -2,8 -7,3" fill="none" stroke="#4af" stroke-width="1.5"/>
+            <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="5s" additive="sum" repeatCount="indefinite"/>
+          </g>
+          <!-- spinning asteroid 4 -->
+          <g transform="translate(98,60)">
+            <polygon points="-8,-3 -4,-8 4,-7 8,-2 7,5 -2,8 -8,4" fill="none" stroke="#4af" stroke-width="1.5"/>
+            <animateTransform attributeName="transform" type="rotate" from="0" to="-360" dur="9s" additive="sum" repeatCount="indefinite"/>
+          </g>
+          <!-- ship -->
+          <polygon points="60,28 48,52 55,47 55,54 65,54 65,47 72,52" fill="none" stroke="#8cf" stroke-width="2" stroke-linejoin="round"/>
+          <!-- thrust flame -->
+          <polygon points="55,54 60,66 65,54" fill="rgba(80,160,255,.5)" stroke="#4af" stroke-width="1">
+            <animate attributeName="opacity" values=".9;.25;.9" dur=".18s" repeatCount="indefinite"/>
+          </polygon>
+          <!-- bullet -->
+          <circle cx="60" cy="24" r="2.2" fill="#ff8">
+            <animate attributeName="cy" values="28;6;28" dur=".72s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="1;1;0" dur=".72s" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+      </div>
+      <div class="card-num">GAME 03 / 04</div>
+      <div class="card-name">Asteroids</div>
+      <div class="card-desc">Navigate the void, split rocks apart, and outrun a deadly UFO in the dark reaches of space.</div>
+      <div class="controls">
+        <span class="key">A / D <em>— Rotate</em></span>
+        <span class="key">W / ↑ <em>— Thrust</em></span>
+        <span class="key">SPACE <em>— Fire</em></span>
+      </div>
+      <div class="play">▶ &nbsp;PLAY</div>
+    </a>
+
+    <!-- SPACE INVADERS -->
+    <a class="card card-si" href="space-invaders.html">
+      <div class="preview">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+          <!-- saucer -->
+          <ellipse cx="100" cy="10" rx="14" ry="5" fill="none" stroke="#f6a" stroke-width="1.5"/>
+          <ellipse cx="100" cy="7"  rx="7"  ry="4" fill="none" stroke="#fcc" stroke-width="1.5"/>
+          <!-- invader grid with step animation -->
+          <g>
+            <!-- row 1: octopus (purple) -->
+            <g fill="#c8f">
+              <rect x="2"  y="5" width="3" height="3"/><rect x="5"  y="5" width="3" height="3"/>
+              <rect x="2"  y="8" width="3" height="3"/><rect x="5"  y="8" width="3" height="3"/>
+              <rect x="8"  y="8" width="3" height="3"/><rect x="11" y="8" width="3" height="3"/>
+              <rect x="8"  y="5" width="3" height="3"/><rect x="11" y="5" width="3" height="3"/>
+
+              <rect x="24" y="5" width="3" height="3"/><rect x="27" y="5" width="3" height="3"/>
+              <rect x="24" y="8" width="3" height="3"/><rect x="27" y="8" width="3" height="3"/>
+              <rect x="21" y="8" width="3" height="3"/><rect x="30" y="8" width="3" height="3"/>
+              <rect x="21" y="5" width="3" height="3"/><rect x="30" y="5" width="3" height="3"/>
+
+              <rect x="46" y="5" width="3" height="3"/><rect x="49" y="5" width="3" height="3"/>
+              <rect x="46" y="8" width="3" height="3"/><rect x="49" y="8" width="3" height="3"/>
+              <rect x="43" y="8" width="3" height="3"/><rect x="52" y="8" width="3" height="3"/>
+              <rect x="43" y="5" width="3" height="3"/><rect x="52" y="5" width="3" height="3"/>
+            </g>
+            <!-- row 2: crab (cyan) -->
+            <g fill="#8cf">
+              <rect x="2"  y="20" width="3" height="3"/><rect x="5"  y="20" width="3" height="3"/>
+              <rect x="2"  y="23" width="3" height="3"/><rect x="5"  y="23" width="3" height="3"/>
+              <rect x="8"  y="20" width="3" height="3"/><rect x="11" y="20" width="3" height="3"/>
+              <rect x="8"  y="17" width="3" height="3"/><rect x="11" y="17" width="3" height="3"/>
+
+              <rect x="24" y="20" width="3" height="3"/><rect x="27" y="20" width="3" height="3"/>
+              <rect x="24" y="23" width="3" height="3"/><rect x="27" y="23" width="3" height="3"/>
+              <rect x="21" y="20" width="3" height="3"/><rect x="30" y="20" width="3" height="3"/>
+              <rect x="21" y="17" width="3" height="3"/><rect x="30" y="17" width="3" height="3"/>
+
+              <rect x="46" y="20" width="3" height="3"/><rect x="49" y="20" width="3" height="3"/>
+              <rect x="46" y="23" width="3" height="3"/><rect x="49" y="23" width="3" height="3"/>
+              <rect x="43" y="20" width="3" height="3"/><rect x="52" y="20" width="3" height="3"/>
+              <rect x="43" y="17" width="3" height="3"/><rect x="52" y="17" width="3" height="3"/>
+            </g>
+            <!-- step left/right like real game -->
+            <animateTransform attributeName="transform" type="translate"
+              values="0,0;5,0;5,0;0,0;-5,0;-5,0;0,0" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/>
+          </g>
+          <!-- shields -->
+          <rect x="4"  y="56" width="18" height="10" rx="1" fill="#0f8" opacity=".75"/>
+          <rect x="34" y="56" width="18" height="10" rx="1" fill="#0f8" opacity=".75"/>
+          <rect x="64" y="56" width="18" height="10" rx="1" fill="#0f8" opacity=".52"/>
+          <rect x="94" y="56" width="18" height="10" rx="1" fill="#0f8" opacity=".75"/>
+          <!-- cannon -->
+          <rect x="53" y="75" width="14" height="6"  fill="#0f8"/>
+          <rect x="57" y="69" width="6"  height="8"  fill="#0f8"/>
+          <rect x="59" y="63" width="2"  height="8"  fill="#0f8"/>
+          <!-- player bullet -->
+          <rect x="59.5" y="36" width="2" height="10" fill="#ff0">
+            <animate attributeName="y" values="54;18;54" dur=".9s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="1;1;0" dur=".9s" repeatCount="indefinite"/>
+          </rect>
+          <!-- enemy bullet -->
+          <rect x="28" y="32" width="2" height="8" fill="#f84" opacity=".85">
+            <animate attributeName="y" values="30;60;30" dur="1.1s" repeatCount="indefinite"/>
+          </rect>
+        </svg>
+      </div>
+      <div class="card-num">GAME 04 / 04</div>
+      <div class="card-name">Space Invaders</div>
+      <div class="card-desc">Alien waves descend relentlessly. Destroy them all before they breach your bunkers — or destroy you.</div>
+      <div class="controls">
+        <span class="key">A / D / ARROWS <em>— Move</em></span>
+        <span class="key">SPACE <em>— Fire</em></span>
+        <span class="key">P <em>— Pause</em></span>
+      </div>
+      <div class="play">▶ &nbsp;PLAY</div>
+    </a>
+
+  </main>
+
+  <div class="marquee-wrap">
+    <div class="marquee-inner">
+      <span>© ARCADE &nbsp;·&nbsp; ALL GAMES FREE TO PLAY &nbsp;·&nbsp; TIC TAC TOE &nbsp;·&nbsp; CENTIPEDE &nbsp;·&nbsp; ASTEROIDS &nbsp;·&nbsp; SPACE INVADERS &nbsp;·&nbsp; HI SCORES SAVED LOCALLY &nbsp;·&nbsp; PRESS SPACE TO START &nbsp;·&nbsp; GOOD LUCK PLAYER ONE &nbsp;·&nbsp; </span>
+      <span>© ARCADE &nbsp;·&nbsp; ALL GAMES FREE TO PLAY &nbsp;·&nbsp; TIC TAC TOE &nbsp;·&nbsp; CENTIPEDE &nbsp;·&nbsp; ASTEROIDS &nbsp;·&nbsp; SPACE INVADERS &nbsp;·&nbsp; HI SCORES SAVED LOCALLY &nbsp;·&nbsp; PRESS SPACE TO START &nbsp;·&nbsp; GOOD LUCK PLAYER ONE &nbsp;·&nbsp; </span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ── Starfield ──────────────────────────────────────────────
+  const cv = document.getElementById('bg');
+  const cx = cv.getContext('2d');
+
+  function resize() { cv.width = window.innerWidth; cv.height = window.innerHeight; }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const stars = Array.from({ length: 200 }, () => ({
+    x:     Math.random() * window.innerWidth,
+    y:     Math.random() * window.innerHeight,
+    r:     Math.random() * 1.3 + 0.2,
+    spd:   Math.random() * 0.22 + 0.04,
+    phase: Math.random() * Math.PI * 2,
+    twSpd: Math.random() * 2.5 + 0.5,
+  }));
+
+  const shooters = [];
+  function spawnShooter() {
+    const angle = (18 + Math.random() * 24) * Math.PI / 180;
+    shooters.push({
+      x: Math.random() * cv.width,
+      y: Math.random() * cv.height * 0.35,
+      vx: Math.cos(angle) * 7, vy: Math.sin(angle) * 7,
+      life: 1,
+    });
+  }
+
+  (function frame() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    for (const s of stars) {
+      s.phase += s.twSpd * 0.016;
+      const a = (0.25 + 0.55 * (0.5 + 0.5 * Math.sin(s.phase))).toFixed(2);
+      cx.fillStyle = `rgba(180,200,255,${a})`;
+      cx.beginPath(); cx.arc(s.x, s.y, s.r, 0, Math.PI * 2); cx.fill();
+      s.y += s.spd;
+      if (s.y > cv.height) { s.y = 0; s.x = Math.random() * cv.width; }
+    }
+    if (Math.random() < 0.003) spawnShooter();
+    for (let i = shooters.length - 1; i >= 0; i--) {
+      const ss = shooters[i];
+      ss.x += ss.vx; ss.y += ss.vy; ss.life -= 0.022;
+      if (ss.life <= 0) { shooters.splice(i, 1); continue; }
+      const g = cx.createLinearGradient(ss.x, ss.y, ss.x - ss.vx * 10, ss.y - ss.vy * 10);
+      g.addColorStop(0, `rgba(255,255,255,${ss.life.toFixed(2)})`);
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      cx.strokeStyle = g; cx.lineWidth = 1.2;
+      cx.beginPath(); cx.moveTo(ss.x, ss.y); cx.lineTo(ss.x - ss.vx * 14, ss.y - ss.vy * 14); cx.stroke();
+    }
+    requestAnimationFrame(frame);
+  })();
+
+  // ── Aggregated hi-score ────────────────────────────────────
+  const best = Math.max(
+    parseInt(localStorage.getItem('centipede_hi') || 0),
+    parseInt(localStorage.getItem('asteroids_hi') || 0),
+    parseInt(localStorage.getItem('sinvaders_hi') || 0)
+  );
+  if (best > 0) document.getElementById('hiscore').textContent = String(best).padStart(6, '0');
+
+  // ── Coin counter animation ─────────────────────────────────
+  let cred = 0;
+  const credEl = document.getElementById('credit');
+  const tick = setInterval(() => {
+    credEl.textContent = String(++cred).padStart(2, '0');
+    if (cred >= 9) clearInterval(tick);
+  }, 130);
+
+  // ── Pixel particle burst on hover ─────────────────────────
+  const ACCENT = { 'card-ttt':'#ffe600','card-cent':'#00ff88','card-ast':'#00e5ff','card-si':'#cc44ff' };
+  document.querySelectorAll('.card').forEach(card => {
+    const color = ACCENT[[...card.classList].find(c => ACCENT[c])] || '#fff';
+    card.addEventListener('mouseenter', () => {
+      const r = card.getBoundingClientRect();
+      for (let i = 0; i < 10; i++) {
+        const p = document.createElement('div');
+        p.className = 'px-p';
+        const dur = 0.65 + Math.random() * 0.5;
+        p.style.cssText = `
+          left:${r.left + Math.random() * r.width}px;
+          top:${r.top + Math.random() * r.height * 0.55}px;
+          background:${color};box-shadow:0 0 5px ${color};
+          --dx:${(Math.random() - 0.5) * 52}px;
+          animation-duration:${dur}s;animation-delay:${Math.random() * 0.12}s;
+        `;
+        document.body.appendChild(p);
+        setTimeout(() => p.remove(), (dur + 0.15) * 1000 + 80);
+      }
+    });
+  });
+
+  // ── Konami code easter egg ─────────────────────────────────
+  const KK = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','KeyB','KeyA'];
+  let ki = 0;
+  window.addEventListener('keydown', e => {
+    ki = e.code === KK[ki] ? ki + 1 : (e.code === KK[0] ? 1 : 0);
+    if (ki < KK.length) return;
+    ki = 0;
+    const t = document.querySelector('.title');
+    const s = document.querySelector('.tagline');
+    t.style.cssText += 'animation:none;color:#ff2d78;text-shadow:0 0 20px #ff2d78,0 0 40px #ff2d78;';
+    Object.assign(s.style, { animation:'none', opacity:'1', color:'#ff2d78' });
+    s.textContent = '— ↑↑↓↓←→←→ BA — CODE ACCEPTED —';
+    setTimeout(() => {
+      t.style.animation = t.style.color = t.style.textShadow = '';
+      s.style.animation = s.style.opacity = s.style.color = '';
+      s.textContent = '— INSERT COIN TO PLAY —';
+    }, 3200);
+  });
+})();
+</script>
+</body>
+</html>
