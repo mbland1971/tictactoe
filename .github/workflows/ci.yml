@@ -2,26 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
 
 jobs:
-  build-test:
+  test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node (optional)
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-        continue-on-error: true
-
-      - name: Install dependencies (if package.json exists)
-        run: |
-          if [ -f package.json ]; then npm ci; fi
-
-      - name: Run tests (if package.json exists)
-        run: |
-          if [ -f package.json ]; then npm test --if-present; fi
+      - run: npm ci
+      - run: npm test

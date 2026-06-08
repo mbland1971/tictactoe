@@ -16,4 +16,4 @@ jobs:
       security-events: write
     uses: github/codeql-action/.github/workflows/codeql.yml@v3
     with:
-      languages: 'javascript, python, go, java'
+      languages: 'javascript'

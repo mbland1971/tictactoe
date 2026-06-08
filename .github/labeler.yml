@@ -1,0 +1,14 @@
+game:
+  - head-branch: ['^game/']
+
+bug:
+  - head-branch: ['^fix/', '^bugfix/', '^hotfix/']
+
+chore:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'package.json'
+          - 'package-lock.json'
+          - '.husky/**'
+          - '.htmlvalidate.json'
