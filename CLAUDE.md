@@ -8,9 +8,18 @@ A small browser arcade: five self-contained HTML games/pages (`index.html`, `tic
 
 ## Running / testing
 
-There is no build or test tooling. To work on a game, just open the file directly in a browser (e.g. `open index.html` on macOS), or serve the directory with any static file server and navigate to it. `index.html` is the launcher and links to each game.
+To work on a game, open the file directly in a browser (e.g. `open index.html` on macOS) or serve the directory with any static file server. `index.html` is the launcher and links to each game.
 
-Run `npm install` once, then `npm run lint` to lint the HTML markup of all pages with [html-validate](https://html-validate.org/) (config in `.htmlvalidate.json`, extends `html-validate:recommended`). It checks markup structure/correctness only — it does not lint the inline CSS or JavaScript.
+Run `npm install` once to install dev dependencies, then use these scripts:
+
+- **`npm test`** (or **`npm run validate`**) — runs `test/validate-html.js`, which does two things:
+  1. **HTML linting** via [html-validate](https://html-validate.org/) on every `*.html` file (config in `.htmlvalidate.json`, extends `html-validate:recommended`). Checks markup structure only — not inline CSS or JS.
+  2. **Repository integrity checks**: verifies that every expected game file exists, that `index.html` links to all of them, and that each canvas game reads and writes its `localStorage` high-score key correctly.
+- **`npm run lint`** — runs only the html-validate linter (no integrity checks).
+
+The pre-commit hook (Husky) runs `npm test` automatically before every commit, so all checks must pass before a commit is accepted.
+
+When adding a new game, `test/validate-html.js` must be updated to include the new game file in `expectedGameFiles` and its `localStorage` key in `localStorageKeyMap`.
 
 Verify changes by playing the game in the browser — check the golden path (start a round, score points, lose all lives / win) and edge cases (pause, game over, restart).
 
