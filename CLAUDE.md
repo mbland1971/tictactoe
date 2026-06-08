@@ -31,6 +31,19 @@ Common structure across the canvas-based games (`centipede.html`, `asteroids.htm
 
 `index.html` is the launcher: a styled grid of `<a class="card">` links to each game, plus a decorative animated canvas background (`spawnShooter`/`frame`) and a read of each game's high-score `localStorage` key.
 
+## Git workflow
+
+Every new game must be developed on its own branch and merged into `main` via a pull request — never commit a new game directly to `main`.
+
+Branch naming: `game/<game-name>` (e.g. `game/snake`, `game/breakout`).
+
+Steps for each new game:
+1. `git checkout -b game/<name>` from an up-to-date `main`.
+2. Build the game and add its card to `index.html` on that branch.
+3. Open a PR against `main` and merge it — do not push directly to `main`.
+
+This applies to new games only. Bug fixes and tweaks to existing games may go directly on `main`.
+
 ## Key conventions
 
 - Keep each game's HTML, CSS, and JS together in its single file — don't extract shared code into separate assets, as that would break the "open the file directly" workflow described in the README.
