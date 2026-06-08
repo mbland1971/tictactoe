@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frogger</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #010802;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace; color: #3e8;
+    }
+    #hud {
+      display: flex; justify-content: space-between;
+      width: 600px; padding: 6px 2px;
+      font-size: 15px; letter-spacing: 1px;
+    }
+    canvas { display: block; border: 2px solid #051005; }
+    #controls {
+      width: 600px; padding: 6px 2px;
+      font-size: 11px; color: #0f2a14; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <span>SCORE <span id="sv">0</span></span>
+    <span>LEVEL <span id="lv">1</span></span>
+    <span>HI&nbsp;&nbsp;<span id="hv">0</span></span>
+    <span>LIVES <span id="liv">♦♦♦</span></span>
+  </div>
+  <canvas id="c" width="600" height="650"></canvas>
+  <div id="controls">
+    Arrow Keys / WASD — Move &nbsp;|&nbsp; P — Pause
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx    = canvas.getContext('2d');
+  const W = 600, H = 650;
+  const CELL = 50;
+  const ROWS = H / CELL; // 13
+
+  // Grid rows (0=top, 12=bottom):
+  // 0  : goal row (5 lily pads)
+  // 1-5: river — frog must ride logs
+  // 6  : median safe strip
+  // 7-11: road — 5 car/truck lanes
+  // 12 : start zone
+
+  const RIVER_ROWS = new Set([1, 2, 3, 4, 5]);
+  const ROAD_ROWS  = new Set([7, 8, 9, 10, 11]);
+  const TIME_LIMIT = 30;
+
+  // Goal positions (pixel centers of lily pads)
+  const GOAL_CX = [70, 185, 300, 415, 530];
+  const GOAL_R  = 22; // claim radius
+
+  // Lane definitions — dir: 1=right, -1=left; objW in cells
+  const LANE_DEFS = [
+    { row:1,  type:'log',   dir: 1, speed: 58,  objW:3, count:3, color:'#6b3a10' },
+    { row:2,  type:'log',   dir:-1, speed: 78,  objW:2, count:4, color:'#5a3010' },
+    { row:3,  type:'log',   dir: 1, speed: 52,  objW:3, count:3, color:'#7a4520' },
+    { row:4,  type:'log',   dir:-1, speed: 72,  objW:2, count:3, color:'#5a3010' },
+    { row:5,  type:'log',   dir: 1, speed: 95,  objW:2, count:4, color:'#6b3a10' },
+    { row:7,  type:'car',   dir:-1, speed:120,  objW:1, count:3, color:'#c02020' },
+    { row:8,  type:'truck', dir: 1, speed: 88,  objW:2, count:2, color:'#705890' },
+    { row:9,  type:'car',   dir:-1, speed:162,  objW:1, count:4, color:'#c84020' },
+    { row:10, type:'car',   dir: 1, speed:108,  objW:1, count:3, color:'#1e55b0' },
+    { row:11, type:'truck', dir:-1, speed: 78,  objW:2, count:2, color:'#506070' },
+  ];
+
+  // ── State ──────────────────────────────────────────────
+  let state = 'title';
+  let score, hiScore, lives, level, goals, timer;
+  let lanes = [], particles = [];
+  let frog = null;
+  let hopCd = 0;
+  let levelClearTimer = 0;
+  let time = 0;
+  let prevTs = 0;
+
+  hiScore = parseInt(localStorage.getItem('frogger_hi') || '0');
+
+  // ── Input ──────────────────────────────────────────────
+  const K = {};
+  window.addEventListener('keydown', e => {
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
+      e.preventDefault();
+    if (K[e.code]) return;
+    K[e.code] = true;
+    if (e.code === 'KeyP') {
+      if (state === 'playing') { state = 'paused'; return; }
+      if (state === 'paused')  { state = 'playing'; prevTs = performance.now(); return; }
+    }
+    if (e.code === 'Space') {
+      if (state === 'title' || state === 'gameover') { startGame(); return; }
+      if (state === 'dead')  { resumeAfterDeath(); return; }
+    }
+    if (state === 'playing') handleHop(e.code);
+  });
+  window.addEventListener('keyup', e => delete K[e.code]);
+
+  function handleHop(code) {
+    if (hopCd > 0) return;
+    let dr = 0, dx = 0;
+    if (code === 'ArrowUp'    || code === 'KeyW') dr = -1;
+    if (code === 'ArrowDown'  || code === 'KeyS') dr =  1;
+    if (code === 'ArrowLeft'  || code === 'KeyA') dx = -CELL;
+    if (code === 'ArrowRight' || code === 'KeyD') dx =  CELL;
+    if (dr === 0 && dx === 0) return;
+
+    const newRow = frog.row + dr;
+    const newX   = frog.pixelX + dx;
+    if (newRow < 0 || newRow >= ROWS) return;
+    if (newX < 0 || newX + CELL > W) return;
+
+    frog.fromX = frog.drawX;
+    frog.fromY = frog.drawY;
+    frog.row   = newRow;
+    frog.pixelX = newX;
+    frog.toX   = newX;
+    frog.toY   = newRow * CELL;
+    frog.hopT  = 0;
+    frog.hopDur = 0.13;
+    if (dr !== 0) frog.facing = dr < 0 ? 'up' : 'down';
+    else          frog.facing = dx < 0 ? 'left' : 'right';
+
+    hopCd = 0.13;
+    if (dr < 0) { score += 10; updateHUD(); }
+  }
+
+  // ── Setup ──────────────────────────────────────────────
+  function startGame() {
+    score = 0; lives = 3; level = 1;
+    goals = new Set();
+    timer = TIME_LIMIT;
+    initLanes();
+    resetFrog();
+    state = 'playing';
+    prevTs = performance.now();
+  }
+
+  function resumeAfterDeath() {
+    timer = TIME_LIMIT;
+    resetFrog();
+    state = 'playing';
+    prevTs = performance.now();
+  }
+
+  function initLanes() {
+    const spd = 1 + (level - 1) * 0.15;
+    lanes = LANE_DEFS.map(def => {
+      const speed  = def.speed * spd;
+      const trackW = W + def.objW * CELL;
+      const spacing = trackW / def.count;
+      const objects = Array.from({ length: def.count }, (_, i) => ({
+        x: i * spacing - def.objW * CELL,
+        w: def.objW * CELL,
+      }));
+      return { ...def, speed, objects };
+    });
+  }
+
+  function resetFrog() {
+    const sx = 5 * CELL, sy = 12 * CELL;
+    frog = {
+      pixelX: sx, row: 12,
+      drawX: sx, drawY: sy,
+      fromX: sx, fromY: sy,
+      toX: sx,   toY: sy,
+      hopT: 1, hopDur: 0.13,
+      facing: 'up',
+    };
+    hopCd = 0;
+    particles = particles.filter(p => p.life > 0); // keep existing burst
+  }
+
+  // ── Update ─────────────────────────────────────────────
+  function update(dt) {
+    time += dt;
+    hopCd = Math.max(0, hopCd - dt);
+
+    // Move lane objects
+    for (const lane of lanes) {
+      for (const obj of lane.objects) {
+        obj.x += lane.dir * lane.speed * dt;
+        if (lane.dir ===  1 && obj.x > W)           obj.x -= W + obj.w;
+        if (lane.dir === -1 && obj.x + obj.w < 0)   obj.x += W + obj.w;
+      }
+    }
+
+    // Hop animation
+    if (frog.hopT < 1) {
+      frog.hopT = Math.min(1, frog.hopT + dt / frog.hopDur);
+      const t = frog.hopT;
+      frog.drawX = frog.fromX + (frog.toX - frog.fromX) * t;
+      frog.drawY = frog.fromY + (frog.toY - frog.fromY) * t - Math.sin(t * Math.PI) * 14;
+    } else {
+      frog.drawX = frog.pixelX;
+      frog.drawY = frog.row * CELL;
+    }
+
+    // Timer countdown
+    timer -= dt;
+    if (timer <= 0) { killFrog(); return; }
+
+    // River: drift with log, die if no log or off-screen
+    if (RIVER_ROWS.has(frog.row)) {
+      const lane = lanes.find(l => l.row === frog.row);
+      const fcx  = frog.pixelX + CELL / 2;
+      const log  = lane.objects.find(o => fcx > o.x && fcx < o.x + o.w);
+      if (!log) { killFrog(); return; }
+      frog.pixelX += lane.dir * lane.speed * dt;
+      frog.toX = frog.pixelX;
+      if (frog.pixelX < 0 || frog.pixelX + CELL > W) { killFrog(); return; }
+    }
+
+    // Road: collision with vehicles
+    if (ROAD_ROWS.has(frog.row)) {
+      const lane = lanes.find(l => l.row === frog.row);
+      const fl = frog.pixelX + 6, fr = frog.pixelX + CELL - 6;
+      if (lane.objects.some(o => fr > o.x + 4 && fl < o.x + o.w - 4)) {
+        killFrog(); return;
+      }
+    }
+
+    // Goal row
+    if (frog.row === 0) {
+      const fcx = frog.pixelX + CELL / 2;
+      const gi  = GOAL_CX.findIndex(cx => Math.abs(fcx - cx) < GOAL_R);
+      if (gi !== -1 && !goals.has(gi)) {
+        goals.add(gi);
+        score += 50 + Math.floor(timer * 10);
+        if (score > hiScore) { hiScore = score; localStorage.setItem('frogger_hi', hiScore); }
+        addBurst(GOAL_CX[gi], CELL / 2, 18, '#3e8');
+        updateHUD();
+        if (goals.size === GOAL_CX.length) {
+          score += 1000;
+          updateHUD();
+          addBurst(W / 2, H / 2, 50, '#ff8');
+          state = 'levelclear';
+          levelClearTimer = 2.8;
+        } else {
+          timer = TIME_LIMIT;
+          resetFrog();
+        }
+      } else {
+        killFrog();
+      }
+      return;
+    }
+
+    // Particles
+    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    particles = particles.filter(p => p.life > 0);
+
+    updateHUD();
+  }
+
+  function killFrog() {
+    addBurst(frog.drawX + CELL / 2, frog.drawY + CELL / 2, 20, '#3e8');
+    lives--;
+    if (score > hiScore) { hiScore = score; localStorage.setItem('frogger_hi', hiScore); }
+    state = lives > 0 ? 'dead' : 'gameover';
+    updateHUD();
+  }
+
+  function addBurst(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
+      const v = 40 + Math.random() * 90;
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.5 + Math.random() * 0.45 });
+    }
+  }
+
+  function updateHUD() {
+    document.getElementById('sv').textContent  = score;
+    document.getElementById('lv').textContent  = level;
+    document.getElementById('hv').textContent  = hiScore;
+    document.getElementById('liv').textContent = '♦'.repeat(Math.max(0, lives)) || '—';
+  }
+
+  // ── Draw ───────────────────────────────────────────────
+  function draw() {
+    // Zone backgrounds
+    for (let r = 0; r < ROWS; r++) {
+      if (r === 0)                ctx.fillStyle = '#061606';
+      else if (RIVER_ROWS.has(r)) ctx.fillStyle = '#00112a';
+      else if (r === 6)           ctx.fillStyle = '#071407';
+      else if (ROAD_ROWS.has(r))  ctx.fillStyle = '#141414';
+      else                        ctx.fillStyle = '#071407';
+      ctx.fillRect(0, r * CELL, W, CELL);
+    }
+
+    // Road markings
+    ctx.strokeStyle = '#252525'; ctx.lineWidth = 1;
+    ctx.setLineDash([14, 11]);
+    for (let r = 7; r <= 11; r++) {
+      const y = r * CELL + CELL / 2;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Grass tufts on median (row 6)
+    ctx.fillStyle = '#0a1e0a';
+    for (let gx = 8; gx < W; gx += 22) {
+      const h = 4 + (gx * 31) % 6;
+      ctx.fillRect(gx, 6 * CELL + CELL - h, 2, h);
+    }
+
+    // Goal lily pads
+    for (let i = 0; i < GOAL_CX.length; i++) {
+      const cx = GOAL_CX[i], cy = CELL / 2;
+      ctx.fillStyle = goals.has(i) ? '#0a5a20' : '#0b3318';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, GOAL_R + 2, GOAL_R + 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = goals.has(i) ? '#2fa840' : '#1a5228';
+      ctx.lineWidth = 1.5; ctx.stroke();
+      // notch
+      ctx.strokeStyle = goals.has(i) ? '#1a7a30' : '#0f2a18';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx, cy - GOAL_R); ctx.lineTo(cx, cy); ctx.stroke();
+      if (goals.has(i)) {
+        // mini frog
+        ctx.fillStyle = '#3e8';
+        ctx.beginPath(); ctx.ellipse(cx, cy + 2, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, cy - 5, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(cx - 3, cy - 8, 1.8, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx + 3, cy - 8, 1.8, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // Water ripples
+    ctx.strokeStyle = 'rgba(25,70,155,0.22)'; ctx.lineWidth = 1;
+    for (let r = 1; r <= 5; r++) {
+      const ry = r * CELL;
+      for (let rx = 8; rx < W; rx += 38) {
+        const wy = ry + 18 + Math.sin(rx * 0.08 + time * 1.8) * 4;
+        ctx.beginPath(); ctx.moveTo(rx, wy); ctx.lineTo(rx + 18, wy); ctx.stroke();
+        const wy2 = ry + 34 + Math.sin(rx * 0.1 + time * 1.4 + 1) * 3;
+        ctx.beginPath(); ctx.moveTo(rx + 8, wy2); ctx.lineTo(rx + 24, wy2); ctx.stroke();
+      }
+    }
+
+    // Logs
+    for (const lane of lanes) {
+      if (lane.type !== 'log') continue;
+      for (const obj of lane.objects) {
+        const lx = obj.x, ly = lane.row * CELL;
+        ctx.fillStyle = lane.color;
+        ctx.beginPath();
+        ctx.roundRect(lx + 2, ly + 8, obj.w - 4, CELL - 16, 5);
+        ctx.fill();
+        // grain lines
+        ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1;
+        for (let i = 1; i < lane.objW; i++) {
+          ctx.beginPath();
+          ctx.moveTo(lx + i * CELL, ly + 10);
+          ctx.lineTo(lx + i * CELL, ly + CELL - 10);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(lx + 2, ly + 8, obj.w - 4, CELL - 16, 5); ctx.stroke();
+      }
+    }
+
+    // Vehicles
+    for (const lane of lanes) {
+      if (lane.type !== 'car' && lane.type !== 'truck') continue;
+      const isTruck = lane.type === 'truck';
+      for (const obj of lane.objects) {
+        const vx = obj.x, vy = lane.row * CELL;
+        ctx.fillStyle = lane.color;
+        ctx.beginPath(); ctx.roundRect(vx + 3, vy + 11, obj.w - 6, CELL - 22, 4); ctx.fill();
+        // windshield
+        ctx.fillStyle = 'rgba(140,200,255,0.32)';
+        const wsW = isTruck ? 14 : 11;
+        const wsX = lane.dir === 1 ? vx + obj.w - wsW - 6 : vx + 6;
+        ctx.fillRect(wsX, vy + 14, wsW, CELL - 28);
+        // wheels
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(vx + 5,           vy + CELL - 13, 8, 5);
+        ctx.fillRect(vx + obj.w - 13,  vy + CELL - 13, 8, 5);
+        if (isTruck) ctx.fillRect(vx + obj.w / 2 - 4, vy + CELL - 13, 8, 5);
+      }
+    }
+
+    // Frog
+    if (frog) drawFrog(frog.drawX, frog.drawY, frog.facing);
+
+    // Particles
+    for (const p of particles) {
+      ctx.globalAlpha = Math.min(p.life * 3, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Timer bar (inside start zone bottom edge)
+    const frac = Math.max(0, timer / TIME_LIMIT);
+    ctx.fillStyle = '#0a140a';
+    ctx.fillRect(2, 12 * CELL + CELL - 9, W - 4, 7);
+    ctx.fillStyle = frac > 0.5 ? '#3e8' : frac > 0.25 ? '#fe0' : '#f44';
+    ctx.fillRect(2, 12 * CELL + CELL - 9, (W - 4) * frac, 7);
+
+    // Overlays
+    if (state === 'title') {
+      overlay(0.72);
+      big('FROGGER', '#3e8', 225);
+      small('PRESS SPACE TO START', '#2a6a3a', 284);
+      small('ARROW KEYS / WASD  ·  P PAUSE', '#163a22', 318);
+      if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#1a4228', 356);
+    }
+    if (state === 'gameover') {
+      overlay(0.76);
+      big('GAME OVER', '#e33', 224);
+      small(`SCORE  ${score}`, '#3e8', 282);
+      small(`HI SCORE  ${hiScore}`, '#2a6', 316);
+      small('PRESS SPACE TO PLAY AGAIN', '#2a6', 356);
+    }
+    if (state === 'dead') {
+      overlay(0.48);
+      big('SPLAT!', '#f84', 234);
+      small(`LIVES REMAINING  ${'♦'.repeat(lives)}`, '#3e8', 290);
+      small('PRESS SPACE TO CONTINUE', '#2a6', 326);
+    }
+    if (state === 'levelclear') {
+      overlay(0.44);
+      big(`LEVEL ${level}`, '#3e8', 228);
+      big('COMPLETE!', '#ff8', 284);
+      small('+1000 BONUS', '#fa4', 332);
+    }
+    if (state === 'paused') {
+      overlay(0.56);
+      big('PAUSED', '#ff0', 268);
+      small('P  TO RESUME', '#aa0', 322);
+    }
+  }
+
+  function drawFrog(x, y, facing) {
+    const cx = x + CELL / 2, cy = y + CELL / 2 + 2;
+    let angle = 0;
+    if (facing === 'down')  angle = Math.PI;
+    if (facing === 'left')  angle = -Math.PI / 2;
+    if (facing === 'right') angle = Math.PI / 2;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+
+    // Back legs
+    ctx.strokeStyle = '#2caa60'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-8, 7);  ctx.lineTo(-17, 20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 8, 7);  ctx.lineTo( 17, 20); ctx.stroke();
+    // Front legs
+    ctx.beginPath(); ctx.moveTo(-7, -4); ctx.lineTo(-17, -14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 7, -4); ctx.lineTo( 17, -14); ctx.stroke();
+    // Feet
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-17, 20); ctx.lineTo(-21, 20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 17, 20); ctx.lineTo( 21, 20); ctx.stroke();
+
+    // Body
+    ctx.fillStyle = '#2caa60';
+    ctx.beginPath(); ctx.ellipse(0, 4, 13, 11, 0, 0, Math.PI * 2); ctx.fill();
+    // Belly
+    ctx.fillStyle = '#50d880';
+    ctx.beginPath(); ctx.ellipse(0, 5, 9, 7, 0, 0, Math.PI * 2); ctx.fill();
+    // Head
+    ctx.fillStyle = '#2caa60';
+    ctx.beginPath(); ctx.ellipse(0, -8, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // Eyes
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-6, -13, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 6, -13, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(-5.5, -13, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 6.5, -13, 2.2, 0, Math.PI * 2); ctx.fill();
+    // Eye shine
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-4.8, -14.2, 1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 7.2, -14.2, 1, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+  }
+
+  function overlay(a) { ctx.fillStyle = `rgba(0,0,0,${a})`; ctx.fillRect(0, 0, W, H); }
+  function big(t, color, y) {
+    ctx.fillStyle = color; ctx.font = 'bold 50px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, W / 2, y);
+  }
+  function small(t, color, y) {
+    ctx.fillStyle = color; ctx.font = '15px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, W / 2, y);
+  }
+
+  // ── Main loop ──────────────────────────────────────────
+  function frame(ts) {
+    const dt = Math.min((ts - prevTs) / 1000, 0.05);
+    prevTs = ts;
+
+    if (state === 'playing') {
+      update(dt);
+    } else if (state === 'levelclear') {
+      time += dt;
+      levelClearTimer -= dt;
+      for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+      particles = particles.filter(p => p.life > 0);
+      if (levelClearTimer <= 0) {
+        level++;
+        goals = new Set();
+        timer = TIME_LIMIT;
+        initLanes();
+        resetFrog();
+        state = 'playing';
+      }
+    } else {
+      time += dt;
+      for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+      particles = particles.filter(p => p.life > 0);
+    }
+
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  updateHUD();
+  draw();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

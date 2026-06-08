@@ -152,6 +152,43 @@ A browser remake of the classic Taito arcade game. Defend Earth from waves of de
 
 ---
 
+## Frogger
+
+A browser remake of the classic Konami arcade game. Guide your frog safely across a busy highway and a flowing river to reach the lily pads on the far bank.
+
+### How to Play
+
+1. Hop your frog up the screen — across traffic lanes and then across the river by riding logs.
+2. Land on each of the five lily pads at the top to complete a level. Reach all five before the timer runs out.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Arrow Keys or WASD | Hop |
+| P | Pause / Unpause |
+
+### Rules
+
+- You have **30 seconds** per frog. The timer bar at the bottom shows time remaining.
+- **Road** (rows 7–11): five lanes of cars and trucks moving in alternating directions. Getting hit costs a life.
+- **River** (rows 1–5): five lanes of logs moving in alternating directions. You must hop onto a log and ride it — stepping into open water is instant death. If a log carries you off the edge of the screen, you also die.
+- **Median** (row 6) and the **start zone** (row 12) are safe.
+- Landing on an already-claimed lily pad or between lily pads in the goal row costs a life.
+- You start with **3 lives**. The game ends when all lives are lost.
+- Each level the lanes speed up by 15%.
+- Your high score is saved for the session.
+
+### Scoring
+
+| Event | Points |
+|-------|--------|
+| Each hop forward | 10 |
+| Reach a lily pad | 50 + time bonus (10 × seconds remaining) |
+| Clear a level (all 5 pads) | 1,000 bonus |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -171,5 +208,6 @@ arcade-games/
 ├── tic-tac-toe.html      # Two-player Tic Tac Toe
 ├── centipede.html        # Single-player Centipede arcade game
 ├── asteroids.html        # Single-player Asteroids arcade game
-└── space-invaders.html   # Single-player Space Invaders arcade game
+├── space-invaders.html   # Single-player Space Invaders arcade game
+└── frogger.html          # Single-player Frogger arcade game
 ```
