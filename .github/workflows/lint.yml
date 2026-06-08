@@ -1,0 +1,23 @@
+name: Lint
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ESLint if config exists
+        run: |
+          if [ -f .eslintrc.js ] || [ -f .eslintrc.json ]; then
+            npm ci
+            npx eslint .
+          fi
+
+      - name: Run Prettier check
+        run: |
+          if [ -f package.json ]; then
+            npx prettier --check .
+          fi
