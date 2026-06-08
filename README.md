@@ -198,6 +198,26 @@ All games are built with plain HTML, CSS, and vanilla JavaScript — no framewor
 | Structure | HTML5 |
 | Styling | CSS3 |
 | Logic | Vanilla JavaScript |
+
+## Validation
+
+This repository includes built-in validation tooling for the HTML files.
+
+- `npm install` to install dev dependencies.
+- `npm test` runs HTML validation via `html-validate`.
+- `npm run validate` runs the dedicated validation agent in `test/validate-html.js`.
+
+A GitHub Actions workflow is included at `.github/workflows/ci.yml` to run the validation on push and pull requests.
+
+## Pre-commit Validation
+
+This repo includes a tracked Husky pre-commit hook that runs `npm test` before each commit. After installing dependencies, the hook is automatically set up by the `prepare` script.
+
+- `npm install`
+- `npm test` to run HTML validation locally
+- `npm run validate` to run the dedicated verification script in `test/validate-html.js`
+
+If you want the hook to install on an existing checkout, re-run `npm install` or `npm run prepare`.
 | Rendering (Centipede, Asteroids, Space Invaders) | HTML5 Canvas 2D |
 
 ## File Structure

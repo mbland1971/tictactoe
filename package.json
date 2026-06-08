@@ -4,9 +4,13 @@
   "description": "Classic arcade games that run entirely in the browser — no installation or server required.",
   "private": true,
   "scripts": {
-    "lint": "html-validate *.html"
+    "lint": "html-validate *.html",
+    "test": "node test/validate-html.js",
+    "validate": "node test/validate-html.js",
+    "prepare": "husky install"
   },
   "devDependencies": {
-    "html-validate": "^11.4.0"
+    "html-validate": "^11.4.0",
+    "husky": "^9.0.0"
   }
 }
