@@ -75,7 +75,7 @@
 
   // ── State ──────────────────────────────────────────────
   let state = 'title';
-  let score, hiScore, lives, level, goals, timer;
+  let score = 0, hiScore, lives = 3, level = 1, goals = new Set(), timer = TIME_LIMIT;
   let lanes = [], particles = [];
   let frog = null;
   let hopCd = 0;
