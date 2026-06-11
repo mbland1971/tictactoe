@@ -1,6 +1,6 @@
 # Arcade Games
 
-Four classic arcade games that run entirely in the browser — no installation or server required.
+Six classic arcade games that run entirely in the browser — no installation or server required.
 
 ## Getting Started
 
@@ -189,6 +189,48 @@ A browser remake of the classic Konami arcade game. Guide your frog safely acros
 
 ---
 
+## Tank Battle
+
+A single-player tank battle game. Fight your way through waves of enemy tanks in a walled arena.
+
+### How to Play
+
+1. Drive your tank around the 600×600 arena, navigating between steel and brick walls.
+2. Shoot enemy tanks before they shoot or ram you. Clear all enemies in a level to advance.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Arrow Keys or WASD | Move / rotate tank |
+| Space | Fire |
+| P | Pause / Unpause |
+
+### Rules
+
+- The arena is a 15×15 grid of 40px tiles, surrounded by indestructible **steel walls** (also forming a central fortress).
+- **Brick walls** are destructible — shoot them to open new paths. Steel walls block shells without breaking.
+- Moving (even into a blocked wall) rotates your tank to face that direction, so you can aim while pressed against a wall.
+- Your shells destroy brick walls and enemy tanks on contact.
+- Getting hit by an enemy shell or colliding with an enemy tank costs a life. You respawn at the starting position with ~1.6 seconds of flashing invulnerability.
+- You start with **3 lives**. The game ends when all lives are lost.
+- Each level has a pool of enemy tanks — `4 + (level − 1) × 2`, capped at 14 — with at most 3 active on the field at once. Destroyed tanks are replaced from the pool until it's empty.
+- Clearing all enemies in a level advances you to the next level with more enemies and a harder mix of types.
+- Enemy tanks navigate toward your position, avoiding walls (with some randomness to avoid getting stuck), and fire when they have a clear line of sight along a row or column.
+- Enemy types are introduced progressively: basic only on level 1; basic and fast from level 2; all three types possible from level 3 onward.
+- Your high score is saved for the session.
+
+### Scoring
+
+| Event | Points |
+|-------|--------|
+| Destroy basic tank (gray, 1 hit) | 100 |
+| Destroy fast tank (yellow, 1 hit) | 200 |
+| Destroy heavy tank (purple, 2 hits) | 300 |
+| Clear a level | 1,000 bonus |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -229,5 +271,6 @@ arcade-games/
 ├── centipede.html        # Single-player Centipede arcade game
 ├── asteroids.html        # Single-player Asteroids arcade game
 ├── space-invaders.html   # Single-player Space Invaders arcade game
-└── frogger.html          # Single-player Frogger arcade game
+├── frogger.html          # Single-player Frogger arcade game
+└── tank.html             # Single-player Tank Battle arcade game
 ```
