@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ARCADE — six free browser games: Tic Tac Toe, Centipede, Asteroids, Space Invaders, Frogger, and Tank Battle. No install, no sign-up, high scores saved locally.">
+  <meta name="theme-color" content="#030208">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23030208'/%3E%3Cpath d='M16 4 L26 25 L16 19 L6 25 Z' fill='%2300e5ff'/%3E%3C/svg%3E">
   <title>ARCADE</title>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -129,6 +132,16 @@
     .card-tank:hover { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(255,140,26,.22); }
     .card:hover::after { box-shadow: 0 0 18px var(--ac), 0 0 36px var(--ac); }
 
+    /* ── Keyboard focus ── */
+    .card:focus-visible {
+      outline: 2px solid var(--ac); outline-offset: 4px;
+      transform: translateY(-5px) scale(1.015);
+      border-color: rgba(255,255,255,.14);
+      box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px var(--ac);
+    }
+    .card:focus-visible::after { box-shadow: 0 0 18px var(--ac), 0 0 36px var(--ac); }
+    .card:focus-visible .play { background: var(--ac); color: #000; box-shadow: 0 0 24px var(--ac); animation: none; }
+
     /* ── Preview ── */
     .preview {
       height: 90px; display: flex; align-items: center; justify-content: center;
@@ -136,7 +149,10 @@
     }
 
     /* ── Card text ── */
-    .card-num  { font-size: 10px; letter-spacing: 3px; color: rgba(255,255,255,.22); margin-bottom: 5px; }
+    .card-num-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+    .card-num  { font-size: 10px; letter-spacing: 3px; color: rgba(255,255,255,.22); }
+    .hi-badge  { font-size: 10px; letter-spacing: 2px; color: rgba(255,255,255,.22); }
+    .hi-badge b { color: var(--ac); font-weight: bold; text-shadow: 0 0 6px var(--ac); }
     .card-name {
       font-size: 20px; font-weight: bold; letter-spacing: 3px; text-transform: uppercase;
       color: var(--ac); text-shadow: 0 0 10px var(--ac); margin-bottom: 8px;
@@ -191,6 +207,15 @@
     .marquee-inner span { font-size: 11px; letter-spacing: 3px; color: rgba(255,255,255,.18); padding-right: 48px; }
     @keyframes ticker { from{transform:translateX(0)} to{transform:translateX(-50%)} }
 
+    /* ── Footer ── */
+    footer { text-align: center; padding: 26px 0 4px; font-size: 11px; letter-spacing: 3px; color: rgba(255,255,255,.22); }
+    footer a {
+      color: rgba(255,255,255,.45); text-decoration: none;
+      border-bottom: 1px dotted rgba(255,255,255,.25);
+      transition: color .18s ease, border-color .18s ease;
+    }
+    footer a:hover, footer a:focus-visible { color: var(--cyan); border-color: var(--cyan); }
+
     /* ── Pixel particles ── */
     .px-p {
       position: fixed; pointer-events: none; z-index: 50;
@@ -203,13 +228,24 @@
       85% { opacity:.4; }
       100%{ opacity:0;   transform: translateY(-72px) translateX(var(--dx)); }
     }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .title { animation: none; text-shadow: 0 0 12px var(--cyan), 0 0 28px var(--cyan), 0 0 55px rgba(0,229,255,.4); }
+      .tagline { animation: none; opacity: 1; }
+      .marquee-inner { animation: none; }
+      .card, .play { transition: none; }
+      .card-ttt .play, .card-cent .play, .card-ast .play,
+      .card-si .play, .card-frog .play, .card-tank .play { animation: none; }
+      .px-p { display: none; }
+    }
   </style>
 </head>
 <body>
 
-<canvas id="bg"></canvas>
-<div class="scanlines"></div>
-<div class="vignette"></div>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="scanlines" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
 
 <div class="wrap">
   <header>
@@ -225,9 +261,9 @@
   <main class="grid">
 
     <!-- TIC TAC TOE -->
-    <a class="card card-ttt" href="tic-tac-toe.html">
+    <a class="card card-ttt" href="tic-tac-toe.html" aria-label="Play Tic Tac Toe">
       <div class="preview">
-        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <line x1="40" y1="6"  x2="40" y2="82" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
           <line x1="80" y1="6"  x2="80" y2="82" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
           <line x1="6"  y1="32" x2="114" y2="32" stroke="#ffe600" stroke-width="1.5" opacity=".55"/>
@@ -251,7 +287,10 @@
           </line>
         </svg>
       </div>
-      <div class="card-num">GAME 01 / 06</div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 01 / 06</span>
+        <span class="hi-badge">BEST <b>—</b></span>
+      </div>
       <div class="card-name">Tic Tac Toe</div>
       <div class="card-desc">Two players battle for the 3×3 grid. Outsmart your opponent and claim three in a row to win.</div>
       <div class="controls">
@@ -262,9 +301,9 @@
     </a>
 
     <!-- CENTIPEDE -->
-    <a class="card card-cent" href="centipede.html">
+    <a class="card card-cent" href="centipede.html" aria-label="Play Centipede">
       <div class="preview">
-        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- mushrooms -->
           <circle cx="18" cy="64" r="5" fill="#245c24" opacity=".8"/>
           <circle cx="42" cy="52" r="5" fill="#317631" opacity=".8"/>
@@ -304,7 +343,10 @@
           </rect>
         </svg>
       </div>
-      <div class="card-num">GAME 02 / 06</div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 02 / 06</span>
+        <span class="hi-badge">BEST <b data-hikey="centipede_hi">000000</b></span>
+      </div>
       <div class="card-name">Centipede</div>
       <div class="card-desc">A relentless centipede winds through the mushroom field toward your cannon. Blast every segment.</div>
       <div class="controls">
@@ -316,9 +358,9 @@
     </a>
 
     <!-- ASTEROIDS -->
-    <a class="card card-ast" href="asteroids.html">
+    <a class="card card-ast" href="asteroids.html" aria-label="Play Asteroids">
       <div class="preview">
-        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- stars -->
           <circle cx="10"  cy="10"  r="1"   fill="#fff" opacity=".5"/>
           <circle cx="108" cy="16"  r="1"   fill="#fff" opacity=".55"/>
@@ -358,7 +400,10 @@
           </circle>
         </svg>
       </div>
-      <div class="card-num">GAME 03 / 06</div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 03 / 06</span>
+        <span class="hi-badge">BEST <b data-hikey="asteroids_hi">000000</b></span>
+      </div>
       <div class="card-name">Asteroids</div>
       <div class="card-desc">Navigate the void, split rocks apart, and outrun a deadly UFO in the dark reaches of space.</div>
       <div class="controls">
@@ -370,9 +415,9 @@
     </a>
 
     <!-- SPACE INVADERS -->
-    <a class="card card-si" href="space-invaders.html">
+    <a class="card card-si" href="space-invaders.html" aria-label="Play Space Invaders">
       <div class="preview">
-        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- saucer -->
           <ellipse cx="100" cy="10" rx="14" ry="5" fill="none" stroke="#f6a" stroke-width="1.5"/>
           <ellipse cx="100" cy="7"  rx="7"  ry="4" fill="none" stroke="#fcc" stroke-width="1.5"/>
@@ -436,7 +481,10 @@
           </rect>
         </svg>
       </div>
-      <div class="card-num">GAME 04 / 06</div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 04 / 06</span>
+        <span class="hi-badge">BEST <b data-hikey="sinvaders_hi">000000</b></span>
+      </div>
       <div class="card-name">Space Invaders</div>
       <div class="card-desc">Alien waves descend relentlessly. Destroy them all before they breach your bunkers — or destroy you.</div>
       <div class="controls">
@@ -448,9 +496,9 @@
     </a>
 
     <!-- FROGGER -->
-    <a class="card card-frog" href="frogger.html">
+    <a class="card card-frog" href="frogger.html" aria-label="Play Frogger">
       <div class="preview">
-        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- river -->
           <rect x="0" y="0" width="120" height="32" fill="#00112a"/>
           <!-- log right -->
@@ -490,7 +538,10 @@
           </g>
         </svg>
       </div>
-      <div class="card-num">GAME 05 / 06</div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 05 / 06</span>
+        <span class="hi-badge">BEST <b data-hikey="frogger_hi">000000</b></span>
+      </div>
       <div class="card-name">Frogger</div>
       <div class="card-desc">Guide your frog across a deadly highway and river to safety. Time every hop — one mistake and it's over.</div>
       <div class="controls">
@@ -502,9 +553,9 @@
     </a>
 
     <!-- TANK BATTLE -->
-    <a class="card card-tank" href="tank.html">
+    <a class="card card-tank" href="tank.html" aria-label="Play Tank Battle">
       <div class="preview">
-        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- arena floor -->
           <rect x="0" y="0" width="120" height="88" fill="#0a0a0a"/>
           <!-- brick wall blocks -->
@@ -540,7 +591,10 @@
           </rect>
         </svg>
       </div>
-      <div class="card-num">GAME 06 / 06</div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 06 / 06</span>
+        <span class="hi-badge">BEST <b data-hikey="tank_hi">000000</b></span>
+      </div>
       <div class="card-name">Tank Battle</div>
       <div class="card-desc">Roll into an arena of steel and brick. Outmaneuver and destroy the enemy tank before it destroys you.</div>
       <div class="controls">
@@ -559,6 +613,10 @@
       <span>© ARCADE &nbsp;·&nbsp; ALL GAMES FREE TO PLAY &nbsp;·&nbsp; TIC TAC TOE &nbsp;·&nbsp; CENTIPEDE &nbsp;·&nbsp; ASTEROIDS &nbsp;·&nbsp; SPACE INVADERS &nbsp;·&nbsp; FROGGER &nbsp;·&nbsp; TANK BATTLE &nbsp;·&nbsp; HI SCORES SAVED LOCALLY &nbsp;·&nbsp; PRESS SPACE TO START &nbsp;·&nbsp; GOOD LUCK PLAYER ONE &nbsp;·&nbsp; </span>
     </div>
   </div>
+
+  <footer>
+    <p>BUILT WITH HTML, CSS &amp; VANILLA JS &nbsp;·&nbsp; <a href="https://github.com/mbland1971/tictactoe" target="_blank" rel="noopener noreferrer">VIEW SOURCE</a> &nbsp;·&nbsp; HIGH SCORES STORED LOCALLY IN YOUR BROWSER</p>
+  </footer>
 </div>
 
 <script>
@@ -566,6 +624,7 @@
   // ── Starfield ──────────────────────────────────────────────
   const cv = document.getElementById('bg');
   const cx = cv.getContext('2d');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function resize() { cv.width = window.innerWidth; cv.height = window.innerHeight; }
   resize();
@@ -591,7 +650,7 @@
     });
   }
 
-  (function frame() {
+  function drawStars() {
     cx.clearRect(0, 0, cv.width, cv.height);
     for (const s of stars) {
       s.phase += s.twSpd * 0.016;
@@ -601,29 +660,38 @@
       s.y += s.spd;
       if (s.y > cv.height) { s.y = 0; s.x = Math.random() * cv.width; }
     }
-    if (Math.random() < 0.003) spawnShooter();
-    for (let i = shooters.length - 1; i >= 0; i--) {
-      const ss = shooters[i];
-      ss.x += ss.vx; ss.y += ss.vy; ss.life -= 0.022;
-      if (ss.life <= 0) { shooters.splice(i, 1); continue; }
-      const g = cx.createLinearGradient(ss.x, ss.y, ss.x - ss.vx * 10, ss.y - ss.vy * 10);
-      g.addColorStop(0, `rgba(255,255,255,${ss.life.toFixed(2)})`);
-      g.addColorStop(1, 'rgba(255,255,255,0)');
-      cx.strokeStyle = g; cx.lineWidth = 1.2;
-      cx.beginPath(); cx.moveTo(ss.x, ss.y); cx.lineTo(ss.x - ss.vx * 14, ss.y - ss.vy * 14); cx.stroke();
-    }
-    requestAnimationFrame(frame);
-  })();
+  }
 
-  // ── Aggregated hi-score ────────────────────────────────────
-  const best = Math.max(
-    parseInt(localStorage.getItem('centipede_hi') || 0),
-    parseInt(localStorage.getItem('asteroids_hi') || 0),
-    parseInt(localStorage.getItem('sinvaders_hi') || 0),
-    parseInt(localStorage.getItem('frogger_hi')   || 0),
-    parseInt(localStorage.getItem('tank_hi')      || 0)
-  );
-  if (best > 0) document.getElementById('hiscore').textContent = String(best).padStart(6, '0');
+  if (reduceMotion) {
+    drawStars();
+  } else {
+    (function frame() {
+      drawStars();
+      if (Math.random() < 0.003) spawnShooter();
+      for (let i = shooters.length - 1; i >= 0; i--) {
+        const ss = shooters[i];
+        ss.x += ss.vx; ss.y += ss.vy; ss.life -= 0.022;
+        if (ss.life <= 0) { shooters.splice(i, 1); continue; }
+        const g = cx.createLinearGradient(ss.x, ss.y, ss.x - ss.vx * 10, ss.y - ss.vy * 10);
+        g.addColorStop(0, `rgba(255,255,255,${ss.life.toFixed(2)})`);
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        cx.strokeStyle = g; cx.lineWidth = 1.2;
+        cx.beginPath(); cx.moveTo(ss.x, ss.y); cx.lineTo(ss.x - ss.vx * 14, ss.y - ss.vy * 14); cx.stroke();
+      }
+      requestAnimationFrame(frame);
+    })();
+  }
+
+  // ── High scores: per-card badges + aggregated marquee score ─
+  try {
+    let best = 0;
+    document.querySelectorAll('[data-hikey]').forEach(el => {
+      const val = parseInt(localStorage.getItem(el.dataset.hikey) || '0', 10);
+      if (val > best) best = val;
+      if (val > 0) el.textContent = String(val).padStart(6, '0');
+    });
+    if (best > 0) document.getElementById('hiscore').textContent = String(best).padStart(6, '0');
+  } catch (e) { /* localStorage unavailable (private browsing, etc.) */ }
 
   // ── Coin counter animation ─────────────────────────────────
   let cred = 0;
@@ -638,6 +706,7 @@
   document.querySelectorAll('.card').forEach(card => {
     const color = ACCENT[[...card.classList].find(c => ACCENT[c])] || '#fff';
     card.addEventListener('mouseenter', () => {
+      if (reduceMotion) return;
       const r = card.getBoundingClientRect();
       for (let i = 0; i < 10; i++) {
         const p = document.createElement('div');
