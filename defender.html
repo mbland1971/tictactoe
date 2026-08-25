@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <title>Defender</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #04040c;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace; color: #5ad7ff;
+    }
+    #hud {
+      display: flex; justify-content: space-between;
+      width: 760px; padding: 6px 2px;
+      font-size: 15px; letter-spacing: 1px;
+    }
+    canvas { display: block; border: 2px solid #10203a; }
+    #controls {
+      width: 760px; padding: 6px 2px;
+      font-size: 11px; color: #2a5070; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <span>SCORE <span id="sv">0</span></span>
+    <span>WAVE <span id="lv">1</span></span>
+    <span>HI&nbsp;&nbsp;<span id="hv">0</span></span>
+    <span>BOMBS <span id="bv">3</span></span>
+    <span>LIVES <span id="liv">▲▲▲</span></span>
+  </div>
+  <canvas id="c" width="760" height="560"></canvas>
+  <div id="controls">
+    ← → — Fly &nbsp;|&nbsp; ↑ ↓ — Climb &nbsp;|&nbsp; SPACE — Fire &nbsp;|&nbsp; B — Bomb &nbsp;|&nbsp; H — Hyperspace &nbsp;|&nbsp; P — Pause
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx    = canvas.getContext('2d');
+
+  // ── Geometry ───────────────────────────────────────────────
+  const W = 760, H = 560;
+  const SCAN_H  = 58;                  // scanner strip across the top
+  const PLAY_Y0 = SCAN_H + 4;          // top of the flyable area
+  const PLAY_H  = H - PLAY_Y0;
+  const WORLD_W = W * 4;               // the planet wraps horizontally
+
+  const TERRAIN_STEP = 20;
+  const TERRAIN_N    = WORLD_W / TERRAIN_STEP;
+
+  // ── Tuning ─────────────────────────────────────────────────
+  const SHIP_VMAX      = 340;
+  const SHIP_ACCEL     = 700;
+  const SHIP_DRAG      = 0.88;
+  const SHIP_VY        = 215;
+  const LASER_SPEED    = 1000;
+  const LASER_LIFE     = 0.4;
+  const FIRE_CD        = 0.1;
+  const RESPAWN_INVULN = 3;
+  const START_LIVES    = 3;
+  const START_BOMBS    = 3;
+  const HUMAN_COUNT    = 10;
+  const SAFE_FALL      = 130;          // longer drops kill the humanoid
+  const BAITER_AFTER   = 32;           // seconds before baiters start hunting
+
+  const PTS = {
+    lander: 150, mutant: 150, baiter: 200, bomber: 250,
+    pod: 1000, swarmer: 150, rescue: 500, grab: 250,
+  };
+
+  // ── Helpers ────────────────────────────────────────────────
+  const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+  const rand  = (a, b) => a + Math.random() * (b - a);
+  const wrapX = x => ((x % WORLD_W) + WORLD_W) % WORLD_W;
+
+  // Shortest signed distance from a to b around the wrapping world.
+  function deltaX(a, b) {
+    let d = wrapX(b - a);
+    if (d > WORLD_W / 2) d -= WORLD_W;
+    return d;
+  }
+
+  // World x -> screen x for the current camera, chosen so entities just off the
+  // left edge draw at small negative values instead of jumping a world away.
+  function toScreen(wx) {
+    let d = wrapX(wx - camX);
+    if (d > WORLD_W - W) d -= WORLD_W;
+    return d;
+  }
+
+  const onScreen = sx => sx > -60 && sx < W + 60;
+
+  // ── Terrain ────────────────────────────────────────────────
+  let terrain = new Float32Array(TERRAIN_N);
+
+  function buildTerrain() {
+    const t  = new Float32Array(TERRAIN_N);
+    const lo = PLAY_Y0 + PLAY_H * 0.58;
+    const hi = PLAY_Y0 + PLAY_H - 12;
+    let h = (lo + hi) / 2;
+    let i = 0;
+    while (i < TERRAIN_N) {
+      const run   = 2 + Math.floor(Math.random() * 5);
+      const slope = rand(-38, 38);
+      for (let k = 0; k < run && i < TERRAIN_N; k++, i++) {
+        h = clamp(h + slope, lo, hi);
+        t[i] = h;
+      }
+    }
+    // Ease the tail back to the head so the wrap seam is invisible.
+    const blend = 8;
+    for (let k = 0; k < blend; k++) {
+      const w = k / blend;
+      const idx = TERRAIN_N - blend + k;
+      t[idx] = t[idx] * (1 - w) + t[0] * w;
+    }
+    return t;
+  }
+
+  function groundYAt(wx) {
+    const p = wrapX(wx) / TERRAIN_STEP;
+    const i = Math.floor(p);
+    const f = p - i;
+    const a = terrain[i % TERRAIN_N];
+    const b = terrain[(i + 1) % TERRAIN_N];
+    return a + (b - a) * f;
+  }
+
+  // ── State ──────────────────────────────────────────────────
+  let state = 'title';
+  let score = 0, hiScore, lives = START_LIVES, wave = 1, bombs = START_BOMBS;
+  let ship, camX = 0;
+  let lasers, enemies, eBullets, mines, humans, particles, floats;
+  let waveTimer, baiterTimer, levelClearTimer, respawnTimer;
+  let planetDead = false;
+  let flash = 0;
+  let prevTs = 0;
+
+  // ── High score storage ─────────────────────────────────────
+  // localStorage is user-writable and can be absent entirely (private
+  // browsing, blocked cookies, sandboxed iframe), so every read is validated
+  // and every access is guarded — a storage failure must never break play.
+  const HI_MAX = 99999999;
+
+  function loadHiScore() {
+    try {
+      const n = parseInt(localStorage.getItem('defender_hi') || '0', 10);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+    } catch (e) {
+      return 0;  // storage unavailable — play on without persistence
+    }
+  }
+
+  function saveHiScore(value) {
+    try {
+      localStorage.setItem('defender_hi', String(value));
+    } catch (e) {
+      // storage unavailable or full — the score still counts for this session
+    }
+  }
+
+  hiScore = loadHiScore();
+
+  function recordHiScore() {
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+  }
+
+  // ── Input ──────────────────────────────────────────────────
+  const K = {};
+  window.addEventListener('keydown', e => {
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
+      e.preventDefault();
+    const repeat = K[e.code];
+    K[e.code] = true;
+
+    if (e.code === 'KeyP') {
+      if (state === 'playing') { state = 'paused'; return; }
+      if (state === 'paused')  { state = 'playing'; prevTs = performance.now(); return; }
+    }
+    if (e.code === 'Space') {
+      if (state === 'title' || state === 'gameover') { startGame(); return; }
+      if (state === 'dead') { resumeAfterDeath(); return; }
+    }
+    if (state !== 'playing' || repeat) return;
+    if (e.code === 'KeyB') smartBomb();
+    if (e.code === 'KeyH') hyperspace();
+  });
+  window.addEventListener('keyup', e => delete K[e.code]);
+
+  // ── Setup ──────────────────────────────────────────────────
+  function startGame() {
+    score = 0; lives = START_LIVES; wave = 1; bombs = START_BOMBS;
+    terrain = buildTerrain();
+    planetDead = false;
+    humans = [];
+    for (let i = 0; i < HUMAN_COUNT; i++) {
+      const x = wrapX((i + 0.5) * (WORLD_W / HUMAN_COUNT) + rand(-60, 60));
+      humans.push({ x, y: groundYAt(x) - 7, state: 'ground', vy: 0, fallFrom: 0, carrier: null });
+    }
+    newWave();
+    state = 'playing';
+    prevTs = performance.now();
+  }
+
+  function newWave() {
+    lasers = []; eBullets = []; mines = []; particles = []; floats = [];
+    enemies = [];
+    waveTimer = 0; baiterTimer = 0; levelClearTimer = 0;
+    resetShip();
+
+    const landers = Math.min(6 + wave * 2, 18);
+    for (let i = 0; i < landers; i++) spawnEnemy('lander');
+    if (wave >= 2) for (let i = 0; i < Math.min(1 + (wave >> 1), 5); i++) spawnEnemy('bomber');
+    if (wave >= 3) for (let i = 0; i < Math.min(1 + (wave >> 2), 4); i++) spawnEnemy('pod');
+
+    updateHUD();
+  }
+
+  function resumeAfterDeath() {
+    lasers = []; eBullets = []; mines = [];
+    // Mutants and swarmers converge on the player, so give the wave a moment
+    // to scatter rather than respawning straight back into the swarm.
+    enemies.forEach(en => { if (en.type === 'mutant' || en.type === 'swarmer') en.timer = 0.9; });
+    resetShip();
+    state = 'playing';
+    prevTs = performance.now();
+    updateHUD();
+  }
+
+  function resetShip() {
+    ship = {
+      x: camX + W * 0.35, y: PLAY_Y0 + PLAY_H * 0.4,
+      vx: 0, vy: 0, dir: 1,
+      invuln: RESPAWN_INVULN, fireCd: 0, carrying: null,
+    };
+    ship.x = wrapX(ship.x);
+    camX = wrapX(ship.x - W * 0.35);
+  }
+
+  function spawnEnemy(type, atX, atY) {
+    const x = atX !== undefined ? atX : wrapX(camX + rand(W * 0.6, WORLD_W - W * 0.6));
+    const y = atY !== undefined ? atY : rand(PLAY_Y0 + 20, PLAY_Y0 + PLAY_H * 0.55);
+    const e = { type, x, y, vx: 0, vy: 0, alive: true, timer: 0, carrying: null, phase: rand(0, 6.3) };
+    if (type === 'lander') { e.vx = rand(-40, 40); e.vy = rand(10, 30); e.mode = 'seek'; }
+    if (type === 'mutant') { e.vx = rand(-90, 90); e.vy = rand(-60, 60); }
+    if (type === 'baiter') { e.vx = 0; e.vy = 0; }
+    if (type === 'bomber') { e.vx = rand(-70, 70) || 50; e.timer = rand(0.6, 1.8); }
+    if (type === 'pod')    { e.vx = rand(-38, 38); e.vy = rand(-24, 24); }
+    if (type === 'swarmer'){ e.vx = rand(-160, 160); e.vy = rand(-160, 160); }
+    enemies.push(e);
+    return e;
+  }
+
+  // ── Player abilities ───────────────────────────────────────
+  function smartBomb() {
+    if (bombs <= 0) return;
+    bombs--;
+    let hit = 0;
+    for (const en of enemies) {
+      if (!en.alive) continue;
+      const sx = toScreen(en.x);
+      if (!onScreen(sx)) continue;
+      // A lander cut down mid-abduction still drops its captive.
+      if (en.carrying) releaseHuman(en);
+      en.alive = false; hit++;
+      score += PTS[en.type] || 0;
+      addParticles(sx, en.y, 8, '#9ff');
+    }
+    mines = mines.filter(m => !onScreen(toScreen(m.x)));
+    flash = 0.32;
+    if (hit) { recordHiScore(); updateHUD(); }
+  }
+
+  function hyperspace() {
+    ship.x = wrapX(ship.x + rand(W * 0.7, WORLD_W - W * 0.7));
+    ship.y = rand(PLAY_Y0 + 30, PLAY_Y0 + PLAY_H * 0.6);
+    ship.vx = 0; ship.vy = 0;
+    camX = wrapX(ship.x - (ship.dir > 0 ? W * 0.35 : W * 0.65));
+    addParticles(toScreen(ship.x), ship.y, 14, '#c9f');
+    // Faithful to the arcade: re-entry is a gamble.
+    if (Math.random() < 0.18) { killShip(); return; }
+    ship.invuln = Math.max(ship.invuln, 0.8);
+  }
+
+  function fire() {
+    lasers.push({ x: ship.x + ship.dir * 16, y: ship.y, dir: ship.dir, life: LASER_LIFE });
+    ship.fireCd = FIRE_CD;
+  }
+
+  // ── Humanoids ──────────────────────────────────────────────
+  function releaseHuman(carrier) {
+    const h = carrier.carrying;
+    if (!h) return;
+    carrier.carrying = null;
+    h.carrier = null;
+    h.state = 'falling';
+    h.vy = 0;
+    h.fallFrom = h.y;
+  }
+
+  function loseHuman(h) {
+    const i = humans.indexOf(h);
+    if (i >= 0) humans.splice(i, 1);
+    if (humans.length === 0 && !planetDead) destroyPlanet();
+  }
+
+  // Losing the last humanoid turns the surface to rubble and every remaining
+  // lander into a mutant — the arcade's point of no return.
+  function destroyPlanet() {
+    planetDead = true;
+    flash = 0.5;
+    for (const en of enemies) {
+      if (!en.alive) continue;
+      if (en.type === 'lander') { en.type = 'mutant'; en.carrying = null; }
+    }
+    for (let i = 0; i < TERRAIN_N; i += 3) {
+      addParticles(toScreen(i * TERRAIN_STEP), terrain[i], 1, '#f66');
+    }
+    addFloat(W / 2, PLAY_Y0 + PLAY_H * 0.4, 'THE PLANET IS LOST', '#f66');
+  }
+
+  // ── Effects ────────────────────────────────────────────────
+  function addParticles(sx, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), v = rand(50, 200);
+      particles.push({ x: sx, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                       color, life: rand(0.25, 0.6) });
+    }
+  }
+
+  function addFloat(sx, y, text, color) {
+    floats.push({ x: sx, y, text, color, life: 1.1 });
+  }
+
+  // ── Death ──────────────────────────────────────────────────
+  function killShip() {
+    if (ship.carrying) {
+      ship.carrying.state = 'falling';
+      ship.carrying.fallFrom = ship.carrying.y;
+      ship.carrying = null;
+    }
+    addParticles(toScreen(ship.x), ship.y, 26, '#5ff');
+    lives--;
+    recordHiScore();
+    state = lives > 0 ? 'dead' : 'gameover';
+    updateHUD();
+  }
+
+  // ── Update ─────────────────────────────────────────────────
+  function update(dt) {
+    waveTimer += dt;
+    if (flash > 0) flash = Math.max(0, flash - dt * 2);
+
+    updateShip(dt);
+    if (state !== 'playing') return;
+
+    updateLasers(dt);
+    updateEnemies(dt);
+    updateHumans(dt);
+    updateBullets(dt);
+    updateEffects(dt);
+
+    // Baiters hurry along anyone camping a cleared-out wave.
+    if (waveTimer > BAITER_AFTER) {
+      baiterTimer -= dt;
+      if (baiterTimer <= 0) {
+        baiterTimer = Math.max(3, 9 - wave * 0.5);
+        const b = spawnEnemy('baiter', wrapX(ship.x + (Math.random() < 0.5 ? -1 : 1) * W * 0.6), ship.y);
+        b.vx = 0;
+      }
+    }
+
+    if (enemies.every(en => !en.alive || en.type === 'baiter') && levelClearTimer <= 0) {
+      levelClearTimer = 2.4;
+      state = 'levelclear';
+      const bonus = humans.length * 100 * wave;
+      if (bonus > 0) {
+        score += bonus;
+        addFloat(W / 2, PLAY_Y0 + PLAY_H * 0.35, `+${bonus}  ${humans.length} SAVED`, '#9f9');
+      }
+      recordHiScore();
+      updateHUD();
+    }
+  }
+
+  function updateShip(dt) {
+    const s = ship;
+    s.invuln = Math.max(0, s.invuln - dt);
+    s.fireCd = Math.max(0, s.fireCd - dt);
+
+    const left  = K.ArrowLeft  || K.KeyA;
+    const right = K.ArrowRight || K.KeyD;
+    if (left && !right)  { if (s.dir !== -1) { s.dir = -1; s.vx *= 0.4; } s.vx -= SHIP_ACCEL * dt; }
+    if (right && !left)  { if (s.dir !==  1) { s.dir =  1; s.vx *= 0.4; } s.vx += SHIP_ACCEL * dt; }
+    if (!left && !right) s.vx *= Math.pow(SHIP_DRAG, dt * 60);
+    s.vx = clamp(s.vx, -SHIP_VMAX, SHIP_VMAX);
+
+    const up   = K.ArrowUp   || K.KeyW;
+    const down = K.ArrowDown || K.KeyS;
+    s.vy = (up ? -SHIP_VY : 0) + (down ? SHIP_VY : 0);
+
+    s.x = wrapX(s.x + s.vx * dt);
+    s.y = clamp(s.y + s.vy * dt, PLAY_Y0 + 10, PLAY_Y0 + PLAY_H - 10);
+
+    if (K.Space && s.fireCd <= 0) fire();
+
+    // The camera leads the ship in whichever direction it is facing.
+    const wantOffset = s.dir > 0 ? W * 0.33 : W * 0.67;
+    const target = wrapX(s.x - wantOffset);
+    camX = wrapX(camX + deltaX(camX, target) * Math.min(1, dt * 4.5));
+
+    // Deliver a rescued humanoid by touching down on the surface.
+    if (s.carrying) {
+      s.carrying.x = s.x;
+      s.carrying.y = s.y + 12;
+      if (s.y + 16 >= groundYAt(s.x) - 6) {
+        const h = s.carrying;
+        s.carrying = null;
+        h.state = 'ground';
+        h.y = groundYAt(h.x) - 7;
+        score += PTS.rescue;
+        addFloat(toScreen(h.x), h.y - 18, `+${PTS.rescue}`, '#ff9');
+        recordHiScore(); updateHUD();
+      }
+    }
+
+    if (s.invuln <= 0 && s.y + 8 >= groundYAt(s.x)) { killShip(); return; }
+
+    if (s.invuln <= 0) {
+      for (const en of enemies) {
+        if (!en.alive) continue;
+        const dx = deltaX(s.x, en.x), dy = en.y - s.y;
+        if (Math.abs(dx) < 14 && Math.abs(dy) < 11) {
+          en.alive = false;
+          addParticles(toScreen(en.x), en.y, 10, '#f88');
+          killShip(); return;
+        }
+      }
+      for (const m of mines) {
+        const dx = deltaX(s.x, m.x), dy = m.y - s.y;
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) { killShip(); return; }
+      }
+    }
+  }
+
+  function updateLasers(dt) {
+    for (const l of lasers) {
+      l.x = wrapX(l.x + l.dir * LASER_SPEED * dt);
+      l.life -= dt;
+      for (const en of enemies) {
+        if (!en.alive) continue;
+        const dx = deltaX(l.x, en.x), dy = en.y - l.y;
+        if (Math.abs(dx) < 22 && Math.abs(dy) < 12) {
+          hitEnemy(en);
+          l.life = 0;
+          break;
+        }
+      }
+    }
+    lasers = lasers.filter(l => l.life > 0);
+  }
+
+  function hitEnemy(en) {
+    en.alive = false;
+    score += PTS[en.type] || 0;
+    addParticles(toScreen(en.x), en.y, 9, en.type === 'pod' ? '#ff0' : '#fa6');
+    addFloat(toScreen(en.x), en.y - 14, `+${PTS[en.type] || 0}`, '#ffd');
+    if (en.carrying) releaseHuman(en);
+    if (en.type === 'pod') {
+      const n = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) spawnEnemy('swarmer', en.x, en.y);
+    }
+    recordHiScore();
+    updateHUD();
+  }
+
+  function updateEnemies(dt) {
+    for (const en of enemies) {
+      if (!en.alive) continue;
+      if (en.timer > 0) { en.timer -= dt; }
+      en.phase += dt;
+      const toShipX = deltaX(en.x, ship.x);
+      const toShipY = ship.y - en.y;
+
+      switch (en.type) {
+        case 'lander':  updateLander(en, dt); break;
+
+        case 'mutant': {
+          // Jittery pursuit — never a clean straight line at the player.
+          const jx = Math.sin(en.phase * 5.5) * 90;
+          const jy = Math.cos(en.phase * 4.1) * 70;
+          en.vx += (Math.sign(toShipX) * 120 + jx - en.vx) * dt * 1.6;
+          en.vy += (Math.sign(toShipY) * 90  + jy - en.vy) * dt * 1.6;
+          en.vx = clamp(en.vx, -260, 260);
+          en.vy = clamp(en.vy, -200, 200);
+          maybeShoot(en, dt, 1.1);
+          break;
+        }
+
+        case 'baiter': {
+          en.vx += (Math.sign(toShipX) * 300 - en.vx) * dt * 2.2;
+          en.vy += (toShipY * 2.2 - en.vy) * dt * 2.2;
+          en.vx = clamp(en.vx, -400, 400);
+          en.vy = clamp(en.vy, -240, 240);
+          maybeShoot(en, dt, 0.9);
+          break;
+        }
+
+        case 'bomber': {
+          en.vy = Math.sin(en.phase * 1.3) * 55;
+          en.timer -= dt;
+          if (en.timer <= 0) {
+            en.timer = rand(0.9, 2.1);
+            mines.push({ x: en.x, y: en.y, life: 7 });
+          }
+          break;
+        }
+
+        case 'pod': {
+          en.vx += Math.sin(en.phase * 0.8) * 12 * dt;
+          en.vy += Math.cos(en.phase * 0.7) * 12 * dt;
+          break;
+        }
+
+        case 'swarmer': {
+          en.vx += (Math.sign(toShipX) * 200 + Math.sin(en.phase * 8) * 120 - en.vx) * dt * 2;
+          en.vy += (Math.sign(toShipY) * 160 + Math.cos(en.phase * 7) * 110 - en.vy) * dt * 2;
+          en.vx = clamp(en.vx, -300, 300);
+          en.vy = clamp(en.vy, -260, 260);
+          maybeShoot(en, dt, 1.4);
+          break;
+        }
+      }
+
+      en.x = wrapX(en.x + en.vx * dt);
+      en.y = clamp(en.y + en.vy * dt, PLAY_Y0 + 6, PLAY_Y0 + PLAY_H - 8);
+
+      // Landers work the surface and stop just above it; everything else
+      // bounces away from the rock.
+      if (en.type === 'lander') {
+        const g = groundYAt(en.x) - 5;
+        if (en.y > g) { en.y = g; if (en.vy > 0) en.vy = 0; }
+      } else {
+        const g = groundYAt(en.x) - 10;
+        if (en.y > g) { en.y = g; en.vy = -Math.abs(en.vy); }
+      }
+      if (en.carrying) { en.carrying.x = en.x; en.carrying.y = en.y + 14; }
+    }
+    enemies = enemies.filter(en => en.alive);
+  }
+
+  function updateLander(en, dt) {
+    if (en.mode === 'seek') {
+      // Head for the nearest humanoid still on the ground.
+      let best = null, bestD = Infinity;
+      for (const h of humans) {
+        if (h.state !== 'ground') continue;
+        const d = Math.abs(deltaX(en.x, h.x));
+        if (d < bestD) { bestD = d; best = h; }
+      }
+      if (!best) {
+        // Nothing left to abduct — the lander gives up and mutates.
+        en.type = 'mutant';
+        return;
+      }
+      const dx = deltaX(en.x, best.x);
+      const dy = best.y - en.y;
+      en.vx += (clamp(dx * 1.6, -95, 95) - en.vx) * dt * 1.8;
+      en.vy = clamp(dy * 2.2, -70, 86);
+      if (Math.abs(dx) < 14 && Math.abs(dy) < 20) {
+        en.mode = 'lift';
+        en.carrying = best;
+        best.state = 'carried';
+        best.carrier = en;
+      }
+      maybeShoot(en, dt, 0.9);
+    } else if (en.mode === 'lift') {
+      en.vx *= 0.9;
+      en.vy = -78;
+      if (en.y <= PLAY_Y0 + 12) {
+        // Abduction complete: lander and captive fuse into a mutant.
+        const h = en.carrying;
+        en.carrying = null;
+        if (h) { h.carrier = null; loseHuman(h); }
+        en.type = 'mutant';
+        en.mode = null;
+        addParticles(toScreen(en.x), en.y, 12, '#f0f');
+      }
+    }
+  }
+
+  function maybeShoot(en, dt, ratePerSec) {
+    if (state !== 'playing') return;
+    const sx = toScreen(en.x);
+    if (!onScreen(sx)) return;
+    if (Math.random() > ratePerSec * dt * 0.5) return;
+    const dx = deltaX(en.x, ship.x), dy = ship.y - en.y;
+    const d = Math.hypot(dx, dy) || 1;
+    eBullets.push({ x: en.x, y: en.y, vx: dx / d * 255, vy: dy / d * 255, life: 2.4 });
+  }
+
+  function updateBullets(dt) {
+    for (const b of eBullets) {
+      b.x = wrapX(b.x + b.vx * dt);
+      b.y += b.vy * dt;
+      b.life -= dt;
+      if (ship.invuln <= 0) {
+        const dx = deltaX(ship.x, b.x), dy = b.y - ship.y;
+        if (Math.abs(dx) < 11 && Math.abs(dy) < 9) { b.life = 0; killShip(); return; }
+      }
+    }
+    eBullets = eBullets.filter(b => b.life > 0 && b.y > PLAY_Y0 && b.y < PLAY_Y0 + PLAY_H);
+    for (const m of mines) m.life -= dt;
+    mines = mines.filter(m => m.life > 0);
+  }
+
+  function updateHumans(dt) {
+    for (const h of humans) {
+      if (h.state === 'falling') {
+        h.vy += 260 * dt;
+        h.y += h.vy * dt;
+
+        // Catch: fly into a falling humanoid to carry it.
+        if (!ship.carrying && state === 'playing') {
+          const dx = deltaX(ship.x, h.x), dy = h.y - ship.y;
+          if (Math.abs(dx) < 18 && Math.abs(dy) < 18) {
+            h.state = 'held';
+            ship.carrying = h;
+            score += PTS.grab;
+            addFloat(toScreen(h.x), h.y - 16, `+${PTS.grab}`, '#ff9');
+            recordHiScore(); updateHUD();
+            continue;
+          }
+        }
+
+        const g = groundYAt(h.x) - 7;
+        if (h.y >= g) {
+          if (h.y - h.fallFrom > SAFE_FALL) {
+            addParticles(toScreen(h.x), g, 8, '#f77');
+            loseHuman(h);
+          } else {
+            h.y = g; h.state = 'ground'; h.vy = 0;
+          }
+        }
+      } else if (h.state === 'ground') {
+        h.y = groundYAt(h.x) - 7;
+      }
+    }
+  }
+
+  function updateEffects(dt) {
+    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    particles = particles.filter(p => p.life > 0);
+    for (const f of floats) { f.y -= 26 * dt; f.life -= dt; }
+    floats = floats.filter(f => f.life > 0);
+  }
+
+  function updateHUD() {
+    document.getElementById('sv').textContent  = score;
+    document.getElementById('lv').textContent  = wave;
+    document.getElementById('hv').textContent  = hiScore;
+    document.getElementById('bv').textContent  = bombs;
+    document.getElementById('liv').textContent = '▲'.repeat(Math.max(0, lives)) || '—';
+  }
+
+  // ── Draw ───────────────────────────────────────────────────
+  function draw() {
+    ctx.fillStyle = '#04040c';
+    ctx.fillRect(0, 0, W, H);
+
+    drawStarfield();
+    drawTerrain();
+    drawHumans();
+    drawMines();
+    drawEnemies();
+    drawLasers();
+    drawShip();
+    drawEffects();
+    drawScanner();
+
+    if (flash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${(flash * 0.6).toFixed(3)})`;
+      ctx.fillRect(0, PLAY_Y0, W, PLAY_H);
+    }
+
+    if (state === 'title') {
+      overlay(0.74);
+      big('DEFENDER', '#5ad7ff', 210);
+      small('PRESS SPACE TO START', '#2f7fa8', 268);
+      small('← → FLY  ·  ↑ ↓ CLIMB  ·  SPACE FIRE', '#1f5f80', 302);
+      small('B SMART BOMB  ·  H HYPERSPACE  ·  P PAUSE', '#1f5f80', 328);
+      small('SAVE THE HUMANOIDS FROM THE LANDERS', '#1a4a66', 362);
+      if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#16405a', 396);
+    }
+    if (state === 'paused') {
+      overlay(0.6);
+      big('PAUSED', '#5ad7ff', 270);
+      small('PRESS P TO RESUME', '#2f7fa8', 312);
+    }
+    if (state === 'dead') {
+      overlay(0.6);
+      big('SHIP LOST', '#ff6a6a', 262);
+      small('PRESS SPACE TO LAUNCH AGAIN', '#2f7fa8', 306);
+      small(`${humans.length} HUMANOIDS REMAIN`, '#1f5f80', 336);
+    }
+    if (state === 'levelclear') {
+      overlay(0.5);
+      big(`WAVE ${wave} CLEAR`, '#9fff9f', 262);
+      small(`${humans.length} HUMANOIDS SAVED`, '#2f7fa8', 306);
+    }
+    if (state === 'gameover') {
+      overlay(0.76);
+      big('GAME OVER', '#ff6a6a', 240);
+      small(`FINAL SCORE  ${score}`, '#5ad7ff', 288);
+      small(`HI SCORE  ${hiScore}`, '#2f7fa8', 318);
+      small('PRESS SPACE TO PLAY AGAIN', '#1f5f80', 356);
+    }
+  }
+
+  // A parallax star layer keyed to the camera so motion reads clearly.
+  function drawStarfield() {
+    ctx.fillStyle = '#1b2540';
+    for (let i = 0; i < 70; i++) {
+      const sx = ((i * 137.5 - camX * 0.35) % W + W) % W;
+      const sy = PLAY_Y0 + (i * 61.7) % (PLAY_H - 20);
+      ctx.fillRect(sx, sy, 1.5, 1.5);
+    }
+  }
+
+  function drawTerrain() {
+    ctx.strokeStyle = planetDead ? '#a33' : '#2f7f5a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const i0 = Math.floor(wrapX(camX) / TERRAIN_STEP) - 1;
+    const span = Math.ceil(W / TERRAIN_STEP) + 3;
+    for (let k = 0; k <= span; k++) {
+      const i  = (i0 + k + TERRAIN_N) % TERRAIN_N;
+      const wx = ((i0 + k) * TERRAIN_STEP);
+      const sx = toScreen(wx);
+      const y  = terrain[i];
+      if (k === 0) ctx.moveTo(sx, y); else ctx.lineTo(sx, y);
+    }
+    ctx.stroke();
+
+    // Fill below the ridge line so the surface reads as solid ground.
+    ctx.lineTo(W + 40, H); ctx.lineTo(-40, H); ctx.closePath();
+    ctx.fillStyle = planetDead ? 'rgba(120,30,30,0.25)' : 'rgba(20,70,50,0.35)';
+    ctx.fill();
+  }
+
+  function drawHumans() {
+    for (const h of humans) {
+      const sx = toScreen(h.x);
+      if (!onScreen(sx)) continue;
+      ctx.fillStyle = h.state === 'falling' ? '#ffd36a' : '#6affa0';
+      ctx.fillRect(sx - 1.5, h.y, 3, 5);       // body
+      ctx.fillRect(sx - 3.5, h.y + 1, 7, 1.5); // arms
+      ctx.fillRect(sx - 1.5, h.y - 3, 3, 3);   // head
+    }
+  }
+
+  function drawMines() {
+    ctx.fillStyle = '#ff5f5f';
+    for (const m of mines) {
+      const sx = toScreen(m.x);
+      if (!onScreen(sx)) continue;
+      ctx.beginPath(); ctx.arc(sx, m.y, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(sx - 6, m.y - 0.75, 12, 1.5);
+      ctx.fillRect(sx - 0.75, m.y - 6, 1.5, 12);
+    }
+  }
+
+  function drawEnemies() {
+    for (const en of enemies) {
+      const sx = toScreen(en.x);
+      if (!onScreen(sx)) continue;
+      switch (en.type) {
+        case 'lander':  drawLander(sx, en.y);  break;
+        case 'mutant':  drawMutant(sx, en.y, en.phase); break;
+        case 'baiter':  drawBaiter(sx, en.y);  break;
+        case 'bomber':  drawBomber(sx, en.y);  break;
+        case 'pod':     drawPod(sx, en.y, en.phase); break;
+        case 'swarmer': drawSwarmer(sx, en.y); break;
+      }
+    }
+  }
+
+  function drawLander(x, y) {
+    ctx.fillStyle = '#c86bff';
+    ctx.fillRect(x - 7, y - 5, 14, 5);
+    ctx.fillStyle = '#e6a6ff';
+    ctx.fillRect(x - 2, y - 8, 4, 3);
+    ctx.fillStyle = '#c86bff';
+    ctx.fillRect(x - 6, y, 2, 7);
+    ctx.fillRect(x + 4, y, 2, 7);
+    ctx.fillRect(x - 1, y, 2, 6);
+  }
+
+  function drawMutant(x, y, phase) {
+    ctx.fillStyle = '#ff4de0';
+    const w = 7 + Math.sin(phase * 9) * 2;
+    ctx.fillRect(x - w, y - 4, w * 2, 8);
+    ctx.fillStyle = '#ffd0f6';
+    ctx.fillRect(x - 3, y - 6, 6, 3);
+    ctx.fillRect(x - 8, y + 2, 3, 3);
+    ctx.fillRect(x + 5, y + 2, 3, 3);
+  }
+
+  function drawBaiter(x, y) {
+    ctx.fillStyle = '#4dff88';
+    ctx.beginPath();
+    ctx.moveTo(x - 12, y); ctx.lineTo(x, y - 6);
+    ctx.lineTo(x + 12, y); ctx.lineTo(x, y + 6);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d8ffe6';
+    ctx.fillRect(x - 2, y - 1.5, 4, 3);
+  }
+
+  function drawBomber(x, y) {
+    ctx.strokeStyle = '#ffb03a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y); ctx.lineTo(x, y - 8);
+    ctx.lineTo(x + 10, y); ctx.lineTo(x, y + 8);
+    ctx.closePath(); ctx.stroke();
+    ctx.fillStyle = '#ffd88a';
+    ctx.fillRect(x - 2, y - 2, 4, 4);
+  }
+
+  function drawPod(x, y, phase) {
+    ctx.strokeStyle = '#ffe14d';
+    ctx.lineWidth = 2;
+    const r = 9 + Math.sin(phase * 3) * 1.5;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r); ctx.lineTo(x, y + r);
+    ctx.stroke();
+  }
+
+  function drawSwarmer(x, y) {
+    ctx.fillStyle = '#7dfcff';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y + 4); ctx.lineTo(x - 5, y + 4);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawLasers() {
+    for (const l of lasers) {
+      const sx = toScreen(l.x);
+      if (!onScreen(sx)) continue;
+      const len = 34 * (l.life / LASER_LIFE) + 12;
+      const g = ctx.createLinearGradient(sx, l.y, sx - l.dir * len, l.y);
+      g.addColorStop(0, '#fff');
+      g.addColorStop(1, 'rgba(90,215,255,0)');
+      ctx.strokeStyle = g; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(sx, l.y); ctx.lineTo(sx - l.dir * len, l.y); ctx.stroke();
+    }
+    ctx.fillStyle = '#ff8080';
+    for (const b of eBullets) {
+      const sx = toScreen(b.x);
+      if (!onScreen(sx)) continue;
+      ctx.fillRect(sx - 2, b.y - 2, 4, 4);
+    }
+  }
+
+  function drawShip() {
+    if (state === 'dead' || state === 'gameover') return;
+    const s = ship;
+    const x = toScreen(s.x), y = s.y;
+    if (s.invuln > 0 && Math.floor(s.invuln * 12) % 2 === 0) return;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s.dir, 1);
+    ctx.fillStyle = '#5ad7ff';
+    ctx.beginPath();
+    ctx.moveTo(16, 0); ctx.lineTo(2, -5); ctx.lineTo(-12, -5);
+    ctx.lineTo(-12, 5); ctx.lineTo(2, 5);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d8f6ff';
+    ctx.fillRect(-6, -2, 10, 4);
+    // Engine flare while accelerating.
+    if ((K.ArrowLeft || K.KeyA || K.ArrowRight || K.KeyD) && Math.random() < 0.8) {
+      ctx.fillStyle = '#ffb03a';
+      ctx.beginPath();
+      ctx.moveTo(-12, -3); ctx.lineTo(-12 - rand(6, 14), 0); ctx.lineTo(-12, 3);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+
+    if (s.carrying) {
+      ctx.fillStyle = '#6affa0';
+      ctx.fillRect(x - 1.5, y + 9, 3, 5);
+      ctx.fillRect(x - 3.5, y + 10, 7, 1.5);
+    }
+  }
+
+  function drawEffects() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.min(p.life * 3, 1);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 13px "Courier New"';
+    for (const f of floats) {
+      ctx.globalAlpha = Math.min(f.life, 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // The scanner shows the whole planet at once, centred on the ship.
+  function drawScanner() {
+    ctx.fillStyle = '#07070f';
+    ctx.fillRect(0, 0, W, SCAN_H);
+    ctx.strokeStyle = '#1d3a56';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, W - 1, SCAN_H - 1);
+
+    const origin = wrapX(ship.x - WORLD_W / 2);
+    const sx = wx => (wrapX(wx - origin) / WORLD_W) * W;
+    const sy = y  => 4 + ((y - PLAY_Y0) / PLAY_H) * (SCAN_H - 8);
+
+    // Viewport bracket: the slice of the world currently on screen.
+    const vx = sx(camX), vw = (W / WORLD_W) * W;
+    ctx.strokeStyle = '#2a5a7a';
+    ctx.strokeRect(vx, 2, vw, SCAN_H - 4);
+
+    ctx.fillStyle = '#2f9f6a';
+    for (let i = 0; i < TERRAIN_N; i += 2) {
+      ctx.fillRect(sx(i * TERRAIN_STEP), sy(terrain[i]), 1.5, 1.5);
+    }
+
+    for (const h of humans) {
+      ctx.fillStyle = h.state === 'ground' ? '#6affa0' : '#ffd36a';
+      ctx.fillRect(sx(h.x) - 1, sy(h.y) - 1, 2.5, 2.5);
+    }
+    for (const en of enemies) {
+      if (!en.alive) continue;
+      ctx.fillStyle = en.type === 'lander' ? '#c86bff'
+                    : en.type === 'mutant' ? '#ff4de0'
+                    : en.type === 'baiter' ? '#4dff88'
+                    : en.type === 'bomber' ? '#ffb03a'
+                    : en.type === 'pod'    ? '#ffe14d' : '#7dfcff';
+      ctx.fillRect(sx(en.x) - 1.5, sy(en.y) - 1.5, 3, 3);
+    }
+
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(sx(ship.x) - 2, sy(ship.y) - 2, 4, 4);
+  }
+
+  function overlay(a) { ctx.fillStyle = `rgba(0,0,0,${a})`; ctx.fillRect(0, 0, W, H); }
+  function big(t, color, y) {
+    ctx.fillStyle = color; ctx.font = 'bold 42px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, W / 2, y);
+  }
+  function small(t, color, y) {
+    ctx.fillStyle = color; ctx.font = '15px "Courier New"';
+    ctx.textAlign = 'center'; ctx.fillText(t, W / 2, y);
+  }
+
+  // ── Main loop ──────────────────────────────────────────────
+  function frame(ts) {
+    const dt = Math.min((ts - prevTs) / 1000, 0.05);
+    prevTs = ts;
+
+    if (state === 'playing') {
+      update(dt);
+    } else if (state === 'levelclear') {
+      levelClearTimer -= dt;
+      updateEffects(dt);
+      if (levelClearTimer <= 0) {
+        wave++;
+        bombs = Math.min(bombs + 1, 6);
+        newWave();
+        state = 'playing';
+      }
+    }
+
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // A title-screen world so the scanner and terrain are populated before play.
+  terrain = buildTerrain();
+  humans = [];
+  for (let i = 0; i < HUMAN_COUNT; i++) {
+    const x = wrapX((i + 0.5) * (WORLD_W / HUMAN_COUNT));
+    humans.push({ x, y: groundYAt(x) - 7, state: 'ground', vy: 0, fallFrom: 0, carrier: null });
+  }
+  newWave();
+
+  updateHUD();
+  draw();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

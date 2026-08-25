@@ -29,14 +29,16 @@ const expectedGameFiles = [
   'asteroids.html',
   'space-invaders.html',
   'frogger.html',
-  'tank.html'
+  'tank.html',
+  'defender.html'
 ];
 const localStorageKeyMap = {
   'asteroids.html': 'asteroids_hi',
   'centipede.html': 'centipede_hi',
   'space-invaders.html': 'sinvaders_hi',
   'frogger.html': 'frogger_hi',
-  'tank.html': 'tank_hi'
+  'tank.html': 'tank_hi',
+  'defender.html': 'defender_hi'
 };
 
 function findGameLinks(htmlText) {
