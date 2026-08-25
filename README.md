@@ -1,6 +1,6 @@
 # Arcade Games
 
-Seven classic arcade games that run entirely in the browser — no installation or server required.
+Eight classic arcade games that run entirely in the browser — no installation or server required.
 
 ## Getting Started
 
@@ -284,6 +284,51 @@ landers from carrying off your humanoids.
 
 ---
 
+## Missile Command
+
+A browser remake of the classic Atari arcade game. Six cities, three missile batteries, and a
+sky full of incoming warheads.
+
+### How to Play
+
+1. Move the crosshair with the mouse (or the arrow keys) and fire a counter-missile at it.
+2. Counter-missiles detonate where you aimed, not where you clicked at the time — **lead the incoming missiles** and let them fly into the blast.
+3. A blast destroys anything it touches, and each kill sets off another blast, so a well-placed shot can chain down a whole salvo.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Mouse | Aim the crosshair |
+| Click | Fire from the nearest battery |
+| Z / X / C | Fire from the left / centre / right battery |
+| Arrow Keys / WASD | Aim without a mouse |
+| Space | Fire from the nearest battery |
+| P | Pause / Unpause |
+
+### Rules
+
+- You defend **six cities** with **three batteries** of **10 missiles each**. Ammunition does not carry over — every battery is refilled at the start of each wave.
+- A battery that takes a direct hit is **destroyed for the rest of the wave**, along with its remaining missiles.
+- **ICBMs** fall in straight lines. From wave 3, some are **MIRVs** that split into two or three warheads part-way down.
+- From wave 4, **satellites** drift across the sky and launch missiles of their own.
+- From wave 5, **smart bombs** appear: they steer around your blasts and have to be caught in the open or cornered.
+- The **score multiplier** rises one step every two waves, up to **6×**.
+- A **bonus city** is awarded every 10,000 points, if any have been destroyed.
+- The game ends when **all six cities are gone**.
+
+### Scoring
+
+| Event | Points (before multiplier) |
+|-------|--------|
+| Destroy an ICBM | 25 |
+| Destroy a satellite | 100 |
+| Destroy a smart bomb | 125 |
+| Each unused missile at the end of a wave | 5 |
+| Each city still standing at the end of a wave | 100 |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -313,7 +358,7 @@ This repo includes a tracked Husky pre-commit hook that runs `npm test` before e
 - `npm run validate` to run the dedicated verification script in `test/validate-html.js`
 
 If you want the hook to install on an existing checkout, re-run `npm install` or `npm run prepare`.
-| Rendering (Centipede, Asteroids, Space Invaders, Frogger, Tank Battle, Defender) | HTML5 Canvas 2D |
+| Rendering (all games except Tic Tac Toe) | HTML5 Canvas 2D |
 
 ## File Structure
 
@@ -326,5 +371,6 @@ arcade-games/
 ├── space-invaders.html   # Single-player Space Invaders arcade game
 ├── frogger.html          # Single-player Frogger arcade game
 ├── tank.html             # Single-player Tank Battle arcade game
-└── defender.html         # Single-player Defender arcade game
+├── defender.html         # Single-player Defender arcade game
+└── missile-command.html  # Single-player Missile Command arcade game
 ```

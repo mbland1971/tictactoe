@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A small browser arcade: eight self-contained HTML games/pages (`index.html`, `tic-tac-toe.html`, `centipede.html`, `asteroids.html`, `space-invaders.html`, `frogger.html`, `tank.html`, `defender.html`). No build step, no package manager, no dependencies — plain HTML5, CSS3, and vanilla JavaScript.
+A small browser arcade: nine self-contained HTML games/pages (`index.html`, `tic-tac-toe.html`, `centipede.html`, `asteroids.html`, `space-invaders.html`, `frogger.html`, `tank.html`, `defender.html`, `missile-command.html`). No build step, no package manager, no dependencies — plain HTML5, CSS3, and vanilla JavaScript.
 
 ## Running / testing
 
@@ -27,11 +27,11 @@ Verify changes by playing the game in the browser — check the golden path (sta
 
 Each game is a **single self-contained `.html` file** with inline `<style>` and `<script>` blocks — there is no shared JS/CSS and no module system. When changing a game, all relevant code lives in that one file.
 
-Common structure across the canvas-based games (`centipede.html`, `asteroids.html`, `space-invaders.html`, `frogger.html`, `tank.html`, `defender.html`):
+Common structure across the canvas-based games (`centipede.html`, `asteroids.html`, `space-invaders.html`, `frogger.html`, `tank.html`, `defender.html`, `missile-command.html`):
 - A single `<canvas id="c">` obtained via `getContext('2d')`, drawn from scratch every frame (vector/shape rendering, no sprite assets).
 - A `requestAnimationFrame`-driven loop (`frame(ts)` → `update(dt)` + `draw()`), with a fixed set of lifecycle functions: `startGame`, `resumeAfterDeath`/`newRound`, `update`, `draw`, `updateHUD`, `overlay` (for start/pause/game-over screens).
 - Keyboard input collected into a key-state map via `keydown`/`keyup` listeners (arrow keys / WASD / Space / P for pause).
-- High scores persisted per-game to `localStorage` under per-game keys (`centipede_hi`, `asteroids_hi`, `sinvaders_hi`, `frogger_hi`, `tank_hi`, `defender_hi`), which `index.html` also reads to show high scores on the launcher cards.
+- High scores persisted per-game to `localStorage` under per-game keys (`centipede_hi`, `asteroids_hi`, `sinvaders_hi`, `frogger_hi`, `tank_hi`, `defender_hi`, `missile_hi`), which `index.html` also reads to show high scores on the launcher cards.
 - Every game reads and writes that key through guarded `loadHiScore()`/`saveHiScore()` helpers: stored values are user-writable, so each read is validated with `Number.isFinite` and clamped, and every access is wrapped in `try`/`catch` so a game still starts when `localStorage` is blocked. `test/validate-html.js` enforces both.
 - Every page carries a restrictive `Content-Security-Policy` meta tag (`default-src 'none'`), also enforced by `test/validate-html.js`. Keep it when adding a page.
 - Lives, levels/waves, scoring tables, and difficulty ramps are implemented as in-file constants/state — see each game's section in `README.md` for the exact rules and point values before changing scoring or balance.
@@ -39,6 +39,8 @@ Common structure across the canvas-based games (`centipede.html`, `asteroids.htm
 `frogger.html` uses a 600×650 canvas (13 rows × 50px) with a grid of river and road lanes. The frog's position is tracked as a continuous pixel x (`pixelX`) that drifts with log speeds in river rows, plus an integer `row`. Hop animation uses `fromX/fromY → toX/toY` with a parabolic arc over 130ms. `localStorage` key: `frogger_hi`. The Frogger card in `index.html` uses `--pink` as its accent color.
 
 `defender.html` uses a 760×560 canvas split into a scanner strip (the top 58px, a minimap of the whole planet centred on the ship) and the flyable area below. The world is `W * 4` wide and **wraps horizontally**, so all positions are world-space and compared with `deltaX()` (shortest signed distance around the wrap) and drawn via `toScreen()`. Terrain is a wrapping `Float32Array` of ridge heights sampled every 20px. Landers abduct humanoids and become mutants at the top of the screen; losing every humanoid triggers `destroyPlanet()`. `localStorage` key: `defender_hi`. The Defender card in `index.html` uses `--blue` as its accent color.
+
+`missile-command.html` is the only **pointer-driven** game: a `mousemove`/`mousedown` pair on the canvas drives the crosshair, converted to canvas space via `getBoundingClientRect()` so CSS scaling cannot skew the aim, with arrow keys and `Z`/`X`/`C` as a keyboard fallback. Counter-missiles detonate at the point they were aimed at, and each blast that kills a warhead spawns another blast, which is what produces the chain reactions. `localStorage` key: `missile_hi`. The Missile Command card in `index.html` uses `--amber` as its accent color.
 
 `tic-tac-toe.html` is DOM-based rather than canvas-based: it renders a 3×3 grid of cells, tracks a board array, and includes a minimax-based AI (`minimax`, `bestMove`) plus win detection (`winner`) and a persistent scoreboard.
 

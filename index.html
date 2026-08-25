@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
-  <meta name="description" content="ARCADE — seven free browser games: Tic Tac Toe, Centipede, Asteroids, Space Invaders, Frogger, Tank Battle, and Defender. No install, no sign-up, high scores saved locally.">
+  <meta name="description" content="ARCADE — eight free browser games: Tic Tac Toe, Centipede, Asteroids, Space Invaders, Frogger, Tank Battle, Defender, and Missile Command. No install, no sign-up, high scores saved locally.">
   <meta name="theme-color" content="#030208">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23030208'/%3E%3Cpath d='M16 4 L26 25 L16 19 L6 25 Z' fill='%2300e5ff'/%3E%3C/svg%3E">
   <title>ARCADE</title>
@@ -19,6 +19,7 @@
       --pink:   #ff2d78;
       --orange: #ff8c1a;
       --blue:   #3d8bff;
+      --amber:  #ff9d3d;
       --dark:   #030208;
       --card:   rgba(6, 4, 18, 0.9);
     }
@@ -125,6 +126,7 @@
     .card-frog { --ac: var(--pink);   }
     .card-tank { --ac: var(--orange); }
     .card-def  { --ac: var(--blue);   }
+    .card-mc   { --ac: var(--amber);  }
 
     .card:hover { transform: translateY(-5px) scale(1.015); border-color: rgba(255,255,255,.14); }
     .card-ttt:hover  { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(255,230,0,.22); }
@@ -134,6 +136,7 @@
     .card-frog:hover { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(255,45,120,.22); }
     .card-tank:hover { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(255,140,26,.22); }
     .card-def:hover  { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(61,139,255,.22); }
+    .card-mc:hover   { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(255,157,61,.22); }
     .card:hover::after { box-shadow: 0 0 18px var(--ac), 0 0 36px var(--ac); }
 
     /* ── Keyboard focus ── */
@@ -186,6 +189,7 @@
     .card-frog .play { animation: pulPk 2.4s ease-in-out infinite; }
     .card-tank .play { animation: pulO  2.4s ease-in-out infinite; }
     .card-def  .play { animation: pulB  2.4s ease-in-out infinite; }
+    .card-mc   .play { animation: pulA  2.4s ease-in-out infinite; }
 
     @keyframes pulY  { 0%,100%{box-shadow:0 0 5px rgba(255,230,0,.2)}   50%{box-shadow:0 0 14px rgba(255,230,0,.55)} }
     @keyframes pulG  { 0%,100%{box-shadow:0 0 5px rgba(0,255,136,.2)}   50%{box-shadow:0 0 14px rgba(0,255,136,.55)} }
@@ -194,6 +198,7 @@
     @keyframes pulPk { 0%,100%{box-shadow:0 0 5px rgba(255,45,120,.2)}  50%{box-shadow:0 0 14px rgba(255,45,120,.55)} }
     @keyframes pulO  { 0%,100%{box-shadow:0 0 5px rgba(255,140,26,.2)}  50%{box-shadow:0 0 14px rgba(255,140,26,.55)} }
     @keyframes pulB  { 0%,100%{box-shadow:0 0 5px rgba(61,139,255,.2)}  50%{box-shadow:0 0 14px rgba(61,139,255,.55)} }
+    @keyframes pulA  { 0%,100%{box-shadow:0 0 5px rgba(255,157,61,.2)}  50%{box-shadow:0 0 14px rgba(255,157,61,.55)} }
 
     .card-ttt:hover  .play { background:var(--yellow); color:#000; box-shadow:0 0 24px var(--yellow); animation:none; }
     .card-cent:hover .play { background:var(--green);  color:#000; box-shadow:0 0 24px var(--green);  animation:none; }
@@ -202,6 +207,7 @@
     .card-frog:hover .play { background:var(--pink);   color:#000; box-shadow:0 0 24px var(--pink);   animation:none; }
     .card-tank:hover .play { background:var(--orange); color:#000; box-shadow:0 0 24px var(--orange); animation:none; }
     .card-def:hover  .play { background:var(--blue);   color:#000; box-shadow:0 0 24px var(--blue);   animation:none; }
+    .card-mc:hover   .play { background:var(--amber);  color:#000; box-shadow:0 0 24px var(--amber);  animation:none; }
 
     /* Centre the lone last card when grid has odd count */
     .grid > .card:last-child:nth-child(odd) {
@@ -244,7 +250,7 @@
       .card, .play { transition: none; }
       .card-ttt .play, .card-cent .play, .card-ast .play,
       .card-si .play, .card-frog .play, .card-tank .play,
-      .card-def .play { animation: none; }
+      .card-def .play, .card-mc .play { animation: none; }
       .px-p { display: none; }
     }
   </style>
@@ -296,7 +302,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 01 / 07</span>
+        <span class="card-num">GAME 01 / 08</span>
         <span class="hi-badge">BEST <b>—</b></span>
       </div>
       <div class="card-name">Tic Tac Toe</div>
@@ -352,7 +358,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 02 / 07</span>
+        <span class="card-num">GAME 02 / 08</span>
         <span class="hi-badge">BEST <b data-hikey="centipede_hi">000000</b></span>
       </div>
       <div class="card-name">Centipede</div>
@@ -409,7 +415,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 03 / 07</span>
+        <span class="card-num">GAME 03 / 08</span>
         <span class="hi-badge">BEST <b data-hikey="asteroids_hi">000000</b></span>
       </div>
       <div class="card-name">Asteroids</div>
@@ -490,7 +496,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 04 / 07</span>
+        <span class="card-num">GAME 04 / 08</span>
         <span class="hi-badge">BEST <b data-hikey="sinvaders_hi">000000</b></span>
       </div>
       <div class="card-name">Space Invaders</div>
@@ -547,7 +553,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 05 / 07</span>
+        <span class="card-num">GAME 05 / 08</span>
         <span class="hi-badge">BEST <b data-hikey="frogger_hi">000000</b></span>
       </div>
       <div class="card-name">Frogger</div>
@@ -600,7 +606,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 06 / 07</span>
+        <span class="card-num">GAME 06 / 08</span>
         <span class="hi-badge">BEST <b data-hikey="tank_hi">000000</b></span>
       </div>
       <div class="card-name">Tank Battle</div>
@@ -657,7 +663,7 @@
         </svg>
       </div>
       <div class="card-num-row">
-        <span class="card-num">GAME 07 / 07</span>
+        <span class="card-num">GAME 07 / 08</span>
         <span class="hi-badge">BEST <b data-hikey="defender_hi">000000</b></span>
       </div>
       <div class="card-name">Defender</div>
@@ -666,6 +672,59 @@
         <span class="key">← → <em>— Fly &amp; Reverse</em></span>
         <span class="key">SPACE <em>— Fire</em></span>
         <span class="key">B / H <em>— Bomb &amp; Hyperspace</em></span>
+      </div>
+      <div class="play">▶ &nbsp;PLAY</div>
+    </a>
+
+    <!-- MISSILE COMMAND -->
+    <a class="card card-mc" href="missile-command.html" aria-label="Play Missile Command">
+      <div class="preview">
+        <svg viewBox="0 0 120 88" width="120" height="88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect x="0" y="0" width="120" height="88" fill="#0a0410"/>
+          <!-- stars -->
+          <rect x="18" y="12" width="1.4" height="1.4" fill="#e6cbe6"/>
+          <rect x="74" y="9"  width="1.4" height="1.4" fill="#e6cbe6"/>
+          <rect x="102" y="20" width="1.4" height="1.4" fill="#e6cbe6"/>
+          <!-- incoming missile trails -->
+          <path d="M24 0 L44 52" stroke="#ff4d6a" stroke-width="1.2" fill="none"/>
+          <path d="M92 0 L70 46" stroke="#ff4d6a" stroke-width="1.2" fill="none"/>
+          <!-- counter-missile from the centre battery -->
+          <path d="M60 70 L52 44" stroke="#9dd8ff" stroke-width="1.2" fill="none"/>
+          <!-- detonation -->
+          <circle cx="52" cy="42" r="7" fill="#ffd23d">
+            <animate attributeName="r" values="2;9;2" dur="1.6s" repeatCount="indefinite"/>
+            <animate attributeName="fill" values="#fff2b0;#ff9d3d;#ff5aff;#fff2b0" dur="1.6s" repeatCount="indefinite"/>
+          </circle>
+          <!-- ground -->
+          <rect x="0" y="72" width="120" height="16" fill="#4a1f3a"/>
+          <rect x="0" y="71" width="120" height="1.5" fill="#8a3a6a"/>
+          <!-- batteries -->
+          <path d="M4 72 L10 64 L16 72 Z" fill="#ffd23d"/>
+          <path d="M54 72 L60 63 L66 72 Z" fill="#ffd23d"/>
+          <path d="M104 72 L110 64 L116 72 Z" fill="#ffd23d"/>
+          <!-- cities -->
+          <g fill="#4dc8ff">
+            <rect x="26" y="64" width="4" height="8"/><rect x="31" y="60" width="4" height="12"/>
+            <rect x="36" y="66" width="4" height="6"/>
+            <rect x="80" y="62" width="4" height="10"/><rect x="85" y="66" width="4" height="6"/>
+            <rect x="90" y="59" width="4" height="13"/>
+          </g>
+          <!-- crosshair -->
+          <g stroke="#7dff9d" stroke-width="1.2">
+            <path d="M66 30 h-4 M72 30 h4 M69 27 v-4 M69 33 v4"/>
+          </g>
+        </svg>
+      </div>
+      <div class="card-num-row">
+        <span class="card-num">GAME 08 / 08</span>
+        <span class="hi-badge">BEST <b data-hikey="missile_hi">000000</b></span>
+      </div>
+      <div class="card-name">Missile Command</div>
+      <div class="card-desc">Six cities, three batteries, and a sky full of warheads. Time every detonation — you will never have enough missiles.</div>
+      <div class="controls">
+        <span class="key">MOUSE <em>— Aim &amp; Fire</em></span>
+        <span class="key">Z X C <em>— Batteries</em></span>
+        <span class="key">P <em>— Pause</em></span>
       </div>
       <div class="play">▶ &nbsp;PLAY</div>
     </a>
@@ -779,7 +838,7 @@
   }, 130);
 
   // ── Pixel particle burst on hover ─────────────────────────
-  const ACCENT = { 'card-ttt':'#ffe600','card-cent':'#00ff88','card-ast':'#00e5ff','card-si':'#cc44ff','card-frog':'#ff2d78','card-tank':'#ff8c1a','card-def':'#3d8bff' };
+  const ACCENT = { 'card-ttt':'#ffe600','card-cent':'#00ff88','card-ast':'#00e5ff','card-si':'#cc44ff','card-frog':'#ff2d78','card-tank':'#ff8c1a','card-def':'#3d8bff','card-mc':'#ff9d3d' };
   const MAX_PARTICLES = 60;   // hard ceiling so fast pointer sweeps can't pile up nodes
   let liveParticles = 0;
   document.querySelectorAll('.card').forEach(card => {
