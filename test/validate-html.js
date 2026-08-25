@@ -90,6 +90,69 @@ function checkLocalStorageKeys() {
   return issues;
 }
 
+// The launcher reads each game's high score from a data-hikey attribute. If that
+// drifts from the key the game itself writes, the card silently shows 0 forever.
+function checkLauncherHiKeys() {
+  const indexText = fs.readFileSync(indexPath, 'utf8');
+  const found = [...indexText.matchAll(/data-hikey=(['"])([^'"]+)\1/gi)].map((m) => m[2]);
+  const expected = Object.values(localStorageKeyMap);
+  const issues = [];
+
+  const unknown = found.filter((key) => !expected.includes(key));
+  if (unknown.length > 0) {
+    issues.push(`index.html reads unknown localStorage key(s): ${unknown.join(', ')}.`);
+  }
+  const unread = expected.filter((key) => !found.includes(key));
+  if (unread.length > 0) {
+    issues.push(`index.html never reads high-score key(s): ${unread.join(', ')}.`);
+  }
+  return issues;
+}
+
+// Every page ships a Content-Security-Policy. These are self-contained files with
+// no external resources, so the policy must stay restrictive.
+function checkContentSecurityPolicy() {
+  const issues = [];
+  for (const file of htmlFiles) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    // The policy value itself contains single quotes ('none'), so match on the
+    // double-quoted attribute rather than a generic quoted-value pattern.
+    const match = text.match(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/i);
+    if (!match) {
+      issues.push(`Missing Content-Security-Policy meta tag in ${file}.`);
+      continue;
+    }
+    const policy = match[1];
+    for (const directive of ["default-src 'none'", "base-uri 'none'", "form-action 'none'"]) {
+      if (!policy.includes(directive)) {
+        issues.push(`CSP in ${file} is missing "${directive}".`);
+      }
+    }
+    if (/script-src[^;]*(https?:|\*)/i.test(policy)) {
+      issues.push(`CSP in ${file} allows remote scripts.`);
+    }
+  }
+  return issues;
+}
+
+// High scores come from user-writable storage, so every game must validate what it
+// reads and tolerate storage being unavailable rather than failing to start.
+function checkStorageHardening() {
+  const issues = [];
+  for (const file of Object.keys(localStorageKeyMap)) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    if (!text.includes('Number.isFinite')) {
+      issues.push(`${file} does not validate the stored high score before using it.`);
+    }
+    const reads = [...text.matchAll(/localStorage\.(getItem|setItem)/g)].length;
+    const guards = [...text.matchAll(/try\s*\{/g)].length;
+    if (guards < reads) {
+      issues.push(`${file} has ${reads} localStorage access(es) but only ${guards} try/catch guard(s).`);
+    }
+  }
+  return issues;
+}
+
 function verifyGameFilesExist() {
   return expectedGameFiles.filter((file) => !fs.existsSync(path.join(root, file)));
 }
@@ -97,6 +160,9 @@ function verifyGameFilesExist() {
 const repoIssues = [];
 repoIssues.push(...checkIndexLinks());
 repoIssues.push(...checkLocalStorageKeys());
+repoIssues.push(...checkLauncherHiKeys());
+repoIssues.push(...checkContentSecurityPolicy());
+repoIssues.push(...checkStorageHardening());
 repoIssues.push(...verifyGameFilesExist().map((file) => `Missing expected game file: ${file}`));
 
 if (repoIssues.length > 0) {

@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <title>Space Invaders</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -68,7 +69,9 @@
 
   // ── State ──────────────────────────────────────────────────
   let state = 'title';
-  let score, hiScore, lives, level;
+  let score = 0, hiScore, lives = 3, level = 1;
+  // Grid offset (marched by stepInvaders) — per-wave state, reset in buildLevel().
+  let gridOffX = 0, gridOffY = 0;
   let player, invaders, shields;
   let bullets, invBullets;
   let saucer;
@@ -79,7 +82,30 @@
   let levelClearTimer;
   let prevTs = 0;
 
-  hiScore = parseInt(localStorage.getItem('sinvaders_hi') || '0');
+  // ── High score storage ─────────────────────────────────────
+  // localStorage is user-writable and can be absent entirely (private
+  // browsing, blocked cookies, sandboxed iframe), so every read is validated
+  // and every access is guarded — a storage failure must never break play.
+  const HI_MAX = 99999999;
+
+  function loadHiScore() {
+    try {
+      const n = parseInt(localStorage.getItem('sinvaders_hi') || '0', 10);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+    } catch (e) {
+      return 0;  // storage unavailable — play on without persistence
+    }
+  }
+
+  function saveHiScore(value) {
+    try {
+      localStorage.setItem('sinvaders_hi', String(value));
+    } catch (e) {
+      // storage unavailable or full — the score still counts for this session
+    }
+  }
+
+  hiScore = loadHiScore();
 
   // ── Input ──────────────────────────────────────────────────
   const K = {};
@@ -129,6 +155,8 @@
       }
     }
 
+    gridOffX     = 0;
+    gridOffY     = 0;
     stepDir      = 1;
     stepDrop     = false;
     stepInterval = Math.max(STEP_MIN, STEP_BASE - (level - 1) * 0.06);
@@ -225,7 +253,7 @@
           addParticles(ix, iy, 8, '#c8f');
           bullets.splice(bi, 1);
           recalcSpeed();
-          if (score > hiScore) { hiScore = score; localStorage.setItem('sinvaders_hi', hiScore); }
+          if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
           updateHUD();
           if (aliveCount() === 0) {
             state = 'levelclear'; levelClearTimer = 2.2;
@@ -252,10 +280,12 @@
       }
     }
 
-    // Invader reaches player zone
+    // Invader reaches the cannon line — the landing ends the game outright.
+    // (Respawning here would be futile: the grid stays where it is, so every
+    // remaining life would be consumed on consecutive frames.)
     for (const inv of invaders) {
       if (inv.alive && invaderY(inv) >= PLAYER_Y - 10) {
-        killPlayer(); return;
+        invadersLanded(); return;
       }
     }
 
@@ -267,9 +297,6 @@
 
     updateHUD();
   }
-
-  // Grid offset based on remaining invaders and step direction
-  let gridOffX = 0, gridOffY = 0;
 
   function stepInvaders() {
     const alive = invaders.filter(i => i.alive);
@@ -400,17 +427,26 @@
         score += pts;
         addFloat(saucer.x, 28, `+${pts}`, '#f6a');
         addParticles(saucer.x, 28, 12, '#f6a');
-        if (score > hiScore) { hiScore = score; localStorage.setItem('sinvaders_hi', hiScore); }
+        if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
         updateHUD();
         saucer = null; bullets.splice(bi, 1); return;
       }
     }
   }
 
+  // Invaders reached the bottom: all remaining lives are lost at once.
+  function invadersLanded() {
+    addParticles(player.x, PLAYER_Y, 22, '#0f8');
+    lives = 0;
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    state = 'gameover';
+    updateHUD();
+  }
+
   function killPlayer() {
     addParticles(player.x, PLAYER_Y, 14, '#0f8');
     lives--;
-    if (score > hiScore) { hiScore = score; localStorage.setItem('sinvaders_hi', hiScore); }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     state = lives > 0 ? 'dead' : 'gameover';
     updateHUD();
   }

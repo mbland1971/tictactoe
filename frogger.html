@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <title>Frogger</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -83,7 +84,30 @@
   let time = 0;
   let prevTs = 0;
 
-  hiScore = parseInt(localStorage.getItem('frogger_hi') || '0');
+  // ── High score storage ─────────────────────────────────────
+  // localStorage is user-writable and can be absent entirely (private
+  // browsing, blocked cookies, sandboxed iframe), so every read is validated
+  // and every access is guarded — a storage failure must never break play.
+  const HI_MAX = 99999999;
+
+  function loadHiScore() {
+    try {
+      const n = parseInt(localStorage.getItem('frogger_hi') || '0', 10);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+    } catch (e) {
+      return 0;  // storage unavailable — play on without persistence
+    }
+  }
+
+  function saveHiScore(value) {
+    try {
+      localStorage.setItem('frogger_hi', String(value));
+    } catch (e) {
+      // storage unavailable or full — the score still counts for this session
+    }
+  }
+
+  hiScore = loadHiScore();
 
   // ── Input ──────────────────────────────────────────────
   const K = {};
@@ -130,7 +154,12 @@
     else          frog.facing = dx < 0 ? 'left' : 'right';
 
     hopCd = 0.13;
-    if (dr < 0) { score += 10; updateHUD(); }
+    // Arcade rule: 10 points for advancing to a row never reached this life.
+    if (newRow < frog.bestRow) {
+      frog.bestRow = newRow;
+      score += 10;
+      updateHUD();
+    }
   }
 
   // ── Setup ──────────────────────────────────────────────
@@ -174,6 +203,7 @@
       toX: sx,   toY: sy,
       hopT: 1, hopDur: 0.13,
       facing: 'up',
+      bestRow: 12,   // furthest row reached this life; only progress past it scores
     };
     hopCd = 0;
     particles = particles.filter(p => p.life > 0); // keep existing burst
@@ -235,7 +265,7 @@
       if (gi !== -1 && !goals.has(gi)) {
         goals.add(gi);
         score += 50 + Math.floor(timer * 10);
-        if (score > hiScore) { hiScore = score; localStorage.setItem('frogger_hi', hiScore); }
+        if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
         addBurst(GOAL_CX[gi], CELL / 2, 18, '#3e8');
         updateHUD();
         if (goals.size === GOAL_CX.length) {
@@ -264,7 +294,7 @@
   function killFrog() {
     addBurst(frog.drawX + CELL / 2, frog.drawY + CELL / 2, 20, '#3e8');
     lives--;
-    if (score > hiScore) { hiScore = score; localStorage.setItem('frogger_hi', hiScore); }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     state = lives > 0 ? 'dead' : 'gameover';
     updateHUD();
   }

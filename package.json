@@ -2,6 +2,9 @@
   "name": "arcade-games",
   "version": "1.0.0",
   "description": "Classic arcade games that run entirely in the browser — no installation or server required.",
+  "engines": {
+    "node": ">=22.17.0"
+  },
   "private": true,
   "scripts": {
     "lint": "html-validate *.html",

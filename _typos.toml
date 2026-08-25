@@ -1,0 +1,7 @@
+# Allow-list for crate-ci/typos. Both entries below are deliberate, not typos:
+#   iy — the invader's interpolated Y coordinate in space-invaders.html,
+#        matching the neighbouring `ix`.
+#   BA — the last two inputs of the Konami code in the index.html easter egg.
+[default.extend-words]
+iy = "iy"
+BA = "BA"

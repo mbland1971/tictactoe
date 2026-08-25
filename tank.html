@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <title>Tank Battle</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -97,7 +98,30 @@
   let levelClearTimer = 0;
   let time = 0, prevTs = 0;
 
-  hiScore = parseInt(localStorage.getItem('tank_hi') || '0');
+  // ── High score storage ─────────────────────────────────────
+  // localStorage is user-writable and can be absent entirely (private
+  // browsing, blocked cookies, sandboxed iframe), so every read is validated
+  // and every access is guarded — a storage failure must never break play.
+  const HI_MAX = 99999999;
+
+  function loadHiScore() {
+    try {
+      const n = parseInt(localStorage.getItem('tank_hi') || '0', 10);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+    } catch (e) {
+      return 0;  // storage unavailable — play on without persistence
+    }
+  }
+
+  function saveHiScore(value) {
+    try {
+      localStorage.setItem('tank_hi', String(value));
+    } catch (e) {
+      // storage unavailable or full — the score still counts for this session
+    }
+  }
+
+  hiScore = loadHiScore();
 
   // ── Input ──────────────────────────────────────────────
   const K = {};
@@ -229,7 +253,7 @@
     if (en.hp <= 0) {
       en.alive = false;
       score += en.points;
-      if (score > hiScore) { hiScore = score; localStorage.setItem('tank_hi', hiScore); }
+      if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
       addBurst(en.x + en.w / 2, en.y + en.h / 2, 24, '#ff8844');
       updateHUD();
     }
@@ -244,7 +268,7 @@
       state = 'dead';
     } else {
       state = 'gameover';
-      if (score > hiScore) { hiScore = score; localStorage.setItem('tank_hi', hiScore); }
+      if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     }
   }
 
@@ -374,7 +398,7 @@
       spawnTimer = 1.0;
     }
 
-    for (const en of enemies) updateEnemy(en, dt);
+    for (const en of enemies) { if (en.alive) updateEnemy(en, dt); }
     enemies = enemies.filter(en => en.alive);
 
     updateBullets(dt);
@@ -382,13 +406,13 @@
 
     if (player.alive && player.invuln <= 0) {
       for (const en of enemies) {
-        if (rectsOverlap(player, en)) { killPlayer(); break; }
+        if (en.alive && rectsOverlap(player, en)) { killPlayer(); break; }
       }
     }
 
     if (state === 'playing' && enemiesQueue === 0 && enemies.length === 0) {
       score += 1000;
-      if (score > hiScore) { hiScore = score; localStorage.setItem('tank_hi', hiScore); }
+      if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
       addBurst(W / 2, H / 2, 50, '#9aff4a');
       updateHUD();
       state = 'levelclear';
