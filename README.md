@@ -1,6 +1,6 @@
 # Arcade Games
 
-Six classic arcade games that run entirely in the browser — no installation or server required.
+Seven classic arcade games that run entirely in the browser — no installation or server required.
 
 ## Getting Started
 
@@ -231,6 +231,59 @@ A single-player tank battle game. Fight your way through waves of enemy tanks in
 
 ---
 
+## Defender
+
+A browser remake of the classic Williams arcade game. Patrol a scrolling planet and stop the
+landers from carrying off your humanoids.
+
+### How to Play
+
+1. Fly left and right across a wrapping planet four screens wide — the scanner at the top shows the whole world at once.
+2. Shoot the landers before they can lift a humanoid to the top of the screen.
+3. If a lander is destroyed mid-abduction, catch the falling humanoid and carry it back down to the surface.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Arrow Left / A | Fly left (reverses the ship) |
+| Arrow Right / D | Fly right (reverses the ship) |
+| Arrow Up / W | Climb |
+| Arrow Down / S | Dive |
+| Space | Fire |
+| B | Smart bomb |
+| H | Hyperspace |
+| P | Pause / Unpause |
+
+### Rules
+
+- The planet **wraps horizontally** — fly far enough in either direction and you return to where you started.
+- Ten **humanoids** stand on the surface. **Landers** descend, grab one, and carry it to the top of the screen.
+- A lander that reaches the top with a humanoid **fuses into a mutant** — fast, erratic, and hostile.
+- Shoot a lander while it is carrying and the humanoid **falls**. Catch it in mid-air and set it down on the surface to rescue it. A humanoid that falls more than a short distance without being caught **dies on impact**.
+- If **every humanoid is lost the planet is destroyed**, the surface turns to rubble, and every remaining lander instantly becomes a mutant.
+- **Baiters** appear if you take too long over a wave, and they are faster than you are.
+- **Bombers** lay mines. **Pods** break apart into fast **swarmers** when destroyed.
+- A **smart bomb** destroys everything currently on screen. **Hyperspace** jumps you somewhere else on the planet, but roughly one jump in five is fatal.
+- Colliding with any enemy, flying into the ground, or being shot costs a life.
+- You start with **3 lives** and **3 smart bombs**, and earn one extra bomb per wave (up to 6).
+
+### Scoring
+
+| Event | Points |
+|-------|--------|
+| Lander | 150 |
+| Mutant | 150 |
+| Swarmer | 150 |
+| Baiter | 200 |
+| Bomber | 250 |
+| Pod | 1,000 |
+| Catch a falling humanoid | 250 |
+| Return a humanoid to the surface | 500 |
+| Each humanoid alive at the end of a wave | 100 × wave number |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -260,7 +313,7 @@ This repo includes a tracked Husky pre-commit hook that runs `npm test` before e
 - `npm run validate` to run the dedicated verification script in `test/validate-html.js`
 
 If you want the hook to install on an existing checkout, re-run `npm install` or `npm run prepare`.
-| Rendering (Centipede, Asteroids, Space Invaders) | HTML5 Canvas 2D |
+| Rendering (Centipede, Asteroids, Space Invaders, Frogger, Tank Battle, Defender) | HTML5 Canvas 2D |
 
 ## File Structure
 
@@ -272,5 +325,6 @@ arcade-games/
 ├── asteroids.html        # Single-player Asteroids arcade game
 ├── space-invaders.html   # Single-player Space Invaders arcade game
 ├── frogger.html          # Single-player Frogger arcade game
-└── tank.html             # Single-player Tank Battle arcade game
+├── tank.html             # Single-player Tank Battle arcade game
+└── defender.html         # Single-player Defender arcade game
 ```
