@@ -3,15 +3,24 @@ name: Dependabot Auto Merge
 on:
   pull_request:
 
-permissions:
-  pull-requests: write
-  contents: write
+permissions: {}
 
 jobs:
   automerge:
     if: ${{ github.actor == 'dependabot[bot]' }}
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
     steps:
-      - uses: fastify/github-action-merge-dependabot@v3
+      # target: minor — patch and minor bumps merge automatically; a MAJOR bump is
+      # left open for a human to review, since a major can change behaviour and
+      # pulls unreviewed transitive code into a workflow that runs on main.
+      #
+      # NOTE: this merges as soon as it runs. It does NOT wait for CI, because
+      # `main` has no branch protection and no required status checks. To close
+      # that gap, protect `main` with "Require status checks to pass" (CI / test).
+      - uses: fastify/github-action-merge-dependabot@73ec4cbb5e56df5591eae286972d5b2201ffe90f # v3.15.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          target: minor

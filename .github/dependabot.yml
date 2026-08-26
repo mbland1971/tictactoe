@@ -1,0 +1,14 @@
+# Pinning actions to commit SHAs (see .github/workflows/) stops a tag from being
+# silently repointed at malicious code, but it also freezes them — so let
+# Dependabot propose the SHA bumps, with a human reviewing anything major.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly

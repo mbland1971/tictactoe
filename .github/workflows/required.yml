@@ -3,6 +3,9 @@ name: Required Checks
 on:
   pull_request:
 
+# This job runs no code and reads nothing — give it no token scope at all.
+permissions: {}
+
 jobs:
   required:
     runs-on: ubuntu-latest

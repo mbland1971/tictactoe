@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <title>Centipede</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -49,11 +50,15 @@
 
   // ── Helpers ────────────────────────────────────────────────
   const mix   = (a, b, t) => a + (b - a) * t;
+  // Interpolation start point for a segment: fall back to the current position
+  // when the previous one is more than a row away, which means the segment
+  // wrapped from the bottom row to the top rather than stepping.
+  const lerpFrom = (prev, seg) => (prev && Math.abs(prev.row - seg.row) <= 1) ? prev : seg;
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 
   // ── State ──────────────────────────────────────────────────
   let state = 'title';
-  let score, hiScore, lives, level;
+  let score = 0, hiScore, lives = 3, level = 1;
   let mushrooms = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
   let trains;
   let player;
@@ -65,7 +70,30 @@
   let levelClearTimer;
   let prevTs = 0;
 
-  hiScore = parseInt(localStorage.getItem('centipede_hi') || '0');
+  // ── High score storage ─────────────────────────────────────
+  // localStorage is user-writable and can be absent entirely (private
+  // browsing, blocked cookies, sandboxed iframe), so every read is validated
+  // and every access is guarded — a storage failure must never break play.
+  const HI_MAX = 99999999;
+
+  function loadHiScore() {
+    try {
+      const n = parseInt(localStorage.getItem('centipede_hi') || '0', 10);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+    } catch (e) {
+      return 0;  // storage unavailable — play on without persistence
+    }
+  }
+
+  function saveHiScore(value) {
+    try {
+      localStorage.setItem('centipede_hi', String(value));
+    } catch (e) {
+      // storage unavailable or full — the score still counts for this session
+    }
+  }
+
+  hiScore = loadHiScore();
 
   // ── Input ──────────────────────────────────────────────────
   const K = {};
@@ -226,7 +254,7 @@
       const lerpT = clamp(tickTimer / tickMs, 0, 1);
       for (const train of trains) {
         for (let i = 0; i < train.segs.length; i++) {
-          const s = train.segs[i], p = train.prev[i] || s;
+          const s = train.segs[i], p = lerpFrom(train.prev[i], s);
           const sx = mix(p.col, s.col, lerpT) * CELL + CELL / 2;
           const sy = mix(p.row, s.row, lerpT) * CELL + CELL / 2;
           if (Math.hypot(player.x - sx, player.y - sy) < CELL * 0.78) {
@@ -248,7 +276,7 @@
     floats.forEach(f => { f.y -= 45 * dt; f.life -= dt; });
     floats = floats.filter(f => f.life > 0);
 
-    if (score > hiScore) { hiScore = score; localStorage.setItem('centipede_hi', hiScore); }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     updateHUD();
   }
 
@@ -362,7 +390,7 @@
   function killPlayer() {
     addSparks(player.x, player.y, 16, '#0f0');
     lives--;
-    if (score > hiScore) { hiScore = score; localStorage.setItem('centipede_hi', hiScore); }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     state = lives > 0 ? 'dead' : 'gameover';
     updateHUD();
   }
@@ -432,7 +460,7 @@
       const lerpT = clamp(tickTimer / (tickMs || 1), 0, 1);
       for (const train of trains) {
         for (let i = train.segs.length - 1; i >= 0; i--) {
-          const s = train.segs[i], p = train.prev[i] || s;
+          const s = train.segs[i], p = lerpFrom(train.prev[i], s);
           const x = mix(p.col, s.col, lerpT) * CELL + CELL / 2;
           const y = mix(p.row, s.row, lerpT) * CELL + CELL / 2;
           const r = CELL / 2 - 2;

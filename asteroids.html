@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <title>Asteroids</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -78,7 +79,7 @@
 
   // ── State ──────────────────────────────────────────────────
   let state = 'title';
-  let score, hiScore, lives, level;
+  let score = 0, hiScore, lives = 3, level = 1;
   let ship;
   let bullets, astBullets;
   let asteroids;
@@ -88,7 +89,30 @@
   let levelClearTimer;
   let prevTs = 0;
 
-  hiScore = parseInt(localStorage.getItem('asteroids_hi') || '0');
+  // ── High score storage ─────────────────────────────────────
+  // localStorage is user-writable and can be absent entirely (private
+  // browsing, blocked cookies, sandboxed iframe), so every read is validated
+  // and every access is guarded — a storage failure must never break play.
+  const HI_MAX = 99999999;
+
+  function loadHiScore() {
+    try {
+      const n = parseInt(localStorage.getItem('asteroids_hi') || '0', 10);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+    } catch (e) {
+      return 0;  // storage unavailable — play on without persistence
+    }
+  }
+
+  function saveHiScore(value) {
+    try {
+      localStorage.setItem('asteroids_hi', String(value));
+    } catch (e) {
+      // storage unavailable or full — the score still counts for this session
+    }
+  }
+
+  hiScore = loadHiScore();
 
   // ── Input ──────────────────────────────────────────────────
   const K = {};
@@ -248,7 +272,7 @@
             children.push(makeAsteroid(def.next, a.x, a.y));
           asteroids.splice(ai, 1, ...children);
           bullets.splice(bi, 1);
-          if (score > hiScore) { hiScore = score; localStorage.setItem('asteroids_hi', hiScore); }
+          if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
           updateHUD();
           continue outer;
         }
@@ -348,7 +372,7 @@
         explode(ufo.x, ufo.y, 22, '#fa4');
         ufo = null;
         bullets.splice(bi, 1);
-        if (score > hiScore) { hiScore = score; localStorage.setItem('asteroids_hi', hiScore); }
+        if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
         updateHUD();
         return;
       }
@@ -361,7 +385,7 @@
   function killShip() {
     explode(ship.x, ship.y, 20, '#8cf');
     lives--;
-    if (score > hiScore) { hiScore = score; localStorage.setItem('asteroids_hi', hiScore); }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     state = lives > 0 ? 'dead' : 'gameover';
     updateHUD();
   }

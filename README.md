@@ -136,8 +136,8 @@ A browser remake of the classic Taito arcade game. Defend Earth from waves of de
 - You can only have **one bullet in the air** at a time.
 - Four **shields** protect you but erode when hit by your shots or enemy fire, and are destroyed when invaders march over them.
 - A **mystery saucer** occasionally flies across the top of the screen for a random bonus.
-- If any invader reaches the cannon's row (or lands), you lose a life.
-- You start with **3 lives**. The game ends when all lives are lost.
+- If any invader reaches the cannon's row, the invasion succeeds and the game ends immediately — remaining lives do not save you.
+- You start with **3 lives**. The game also ends when all lives are lost to enemy fire.
 - Your high score is saved for the session.
 
 ### Scoring
@@ -183,7 +183,7 @@ A browser remake of the classic Konami arcade game. Guide your frog safely acros
 
 | Event | Points |
 |-------|--------|
-| Each hop forward | 10 |
+| Advance to a row not yet reached this life | 10 |
 | Reach a lily pad | 50 + time bonus (10 × seconds remaining) |
 | Clear a level (all 5 pads) | 1,000 bonus |
 

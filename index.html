@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <meta name="description" content="ARCADE — six free browser games: Tic Tac Toe, Centipede, Asteroids, Space Invaders, Frogger, and Tank Battle. No install, no sign-up, high scores saved locally.">
   <meta name="theme-color" content="#030208">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23030208'/%3E%3Cpath d='M16 4 L26 25 L16 19 L6 25 Z' fill='%2300e5ff'/%3E%3C/svg%3E">
@@ -628,7 +629,12 @@
 
   function resize() { cv.width = window.innerWidth; cv.height = window.innerHeight; }
   resize();
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', () => {
+    resize();
+    // Resizing clears the canvas; the rAF loop repaints it next frame, but with
+    // motion reduced there is no loop — repaint explicitly or it stays blank.
+    if (reduceMotion) drawStars();
+  });
 
   const stars = Array.from({ length: 200 }, () => ({
     x:     Math.random() * window.innerWidth,
@@ -683,10 +689,17 @@
   }
 
   // ── High scores: per-card badges + aggregated marquee score ─
+  // Stored scores are user-writable: validate before trusting or displaying.
+  const HI_MAX = 99999999;
+  const readHi = key => {
+    const n = parseInt(localStorage.getItem(key) || '0', 10);
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), HI_MAX) : 0;
+  };
+
   try {
     let best = 0;
     document.querySelectorAll('[data-hikey]').forEach(el => {
-      const val = parseInt(localStorage.getItem(el.dataset.hikey) || '0', 10);
+      const val = readHi(el.dataset.hikey);
       if (val > best) best = val;
       if (val > 0) el.textContent = String(val).padStart(6, '0');
     });
@@ -703,12 +716,16 @@
 
   // ── Pixel particle burst on hover ─────────────────────────
   const ACCENT = { 'card-ttt':'#ffe600','card-cent':'#00ff88','card-ast':'#00e5ff','card-si':'#cc44ff','card-frog':'#ff2d78','card-tank':'#ff8c1a' };
+  const MAX_PARTICLES = 60;   // hard ceiling so fast pointer sweeps can't pile up nodes
+  let liveParticles = 0;
   document.querySelectorAll('.card').forEach(card => {
     const color = ACCENT[[...card.classList].find(c => ACCENT[c])] || '#fff';
     card.addEventListener('mouseenter', () => {
-      if (reduceMotion) return;
+      if (reduceMotion || document.hidden) return;
       const r = card.getBoundingClientRect();
       for (let i = 0; i < 10; i++) {
+        if (liveParticles >= MAX_PARTICLES) break;
+        liveParticles++;
         const p = document.createElement('div');
         p.className = 'px-p';
         const dur = 0.65 + Math.random() * 0.5;
@@ -720,24 +737,26 @@
           animation-duration:${dur}s;animation-delay:${Math.random() * 0.12}s;
         `;
         document.body.appendChild(p);
-        setTimeout(() => p.remove(), (dur + 0.15) * 1000 + 80);
+        setTimeout(() => { p.remove(); liveParticles--; }, (dur + 0.15) * 1000 + 80);
       }
     });
   });
 
   // ── Konami code easter egg ─────────────────────────────────
   const KK = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','KeyB','KeyA'];
-  let ki = 0;
+  let ki = 0, kTimer = null;
   window.addEventListener('keydown', e => {
     ki = e.code === KK[ki] ? ki + 1 : (e.code === KK[0] ? 1 : 0);
     if (ki < KK.length) return;
     ki = 0;
+    clearTimeout(kTimer);   // re-entering the code restarts the effect cleanly
     const t = document.querySelector('.title');
     const s = document.querySelector('.tagline');
     t.style.cssText += 'animation:none;color:#ff2d78;text-shadow:0 0 20px #ff2d78,0 0 40px #ff2d78;';
     Object.assign(s.style, { animation:'none', opacity:'1', color:'#ff2d78' });
     s.textContent = '— ↑↑↓↓←→←→ BA — CODE ACCEPTED —';
-    setTimeout(() => {
+    kTimer = setTimeout(() => {
+      kTimer = null;
       t.style.animation = t.style.color = t.style.textShadow = '';
       s.style.animation = s.style.opacity = s.style.color = '';
       s.textContent = '— INSERT COIN TO PLAY —';

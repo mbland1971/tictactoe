@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <title>Tic Tac Toe</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -153,10 +154,12 @@
   const KEY_MAP = {'7':0,'8':1,'9':2,'4':3,'5':4,'6':5,'1':6,'2':7,'3':8};
 
   let board, current, gameOver, scores, mode, aiThinking, nextFirst;
+  let aiTimer = null;
   mode = '2p'; nextFirst = 'X';
 
   // ── Init ─────────────────────────────────────────────────
   function init() {
+    cancelAI();
     board = Array(9).fill(null);
     current = nextFirst;
     gameOver = false; aiThinking = false;
@@ -177,11 +180,22 @@
     return (mode === 'ai' && p === 'O') ? 'Computer' : `Player ${p}`;
   }
 
+  // Marks are written as text, never as markup — the cell content is never
+  // an HTML sink, regardless of what ends up in the board array.
+  function setMark(cell, value) {
+    cell.textContent = '';
+    if (!value) return;
+    const mark = document.createElement('span');
+    mark.className = 'mark';
+    mark.textContent = value;
+    cell.appendChild(mark);
+  }
+
   function render() {
     document.querySelectorAll('.cell').forEach((cell, i) => {
       const v = board[i];
       cell.className = 'cell' + (v ? ' taken ' + v.toLowerCase() : '');
-      cell.innerHTML = v ? `<span class="mark">${v}</span>` : '';
+      setMark(cell, v);
     });
 
     const st = document.getElementById('status');
@@ -209,7 +223,7 @@
     board[i] = current;
     const cell = document.querySelectorAll('.cell')[i];
     cell.className = `cell taken just-placed ${current.toLowerCase()}`;
-    cell.innerHTML = `<span class="mark">${current}</span>`;
+    setMark(cell, current);
     setTimeout(() => cell.classList.remove('just-placed'), 220);
     resolve();
   }
@@ -258,11 +272,21 @@
   }
 
   // ── AI ────────────────────────────────────────────────────
+  function cancelAI() {
+    if (aiTimer !== null) { clearTimeout(aiTimer); aiTimer = null; }
+    aiThinking = false;
+  }
+
   function scheduleAI() {
+    cancelAI();
     aiThinking = true; render();
-    setTimeout(() => {
+    aiTimer = setTimeout(() => {
+      aiTimer = null;
       aiThinking = false;
-      if (!gameOver) { commit(bestMove([...board])); }
+      // Re-check state: a restart or mode switch may have landed while we waited.
+      if (gameOver || mode !== 'ai' || current !== 'O') { render(); return; }
+      const move = bestMove([...board]);
+      if (move >= 0) commit(move); else render();
     }, 380);
   }
 
@@ -317,12 +341,14 @@
   document.getElementById('restart').addEventListener('click', init);
 
   document.getElementById('btn-2p').addEventListener('click', () => {
+    cancelAI();
     mode = '2p'; scores = null; nextFirst = 'X';
     document.getElementById('btn-2p').classList.add('active');
     document.getElementById('btn-ai').classList.remove('active');
     init();
   });
   document.getElementById('btn-ai').addEventListener('click', () => {
+    cancelAI();
     mode = 'ai'; scores = null; nextFirst = 'X';
     document.getElementById('btn-ai').classList.add('active');
     document.getElementById('btn-2p').classList.remove('active');
