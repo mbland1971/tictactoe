@@ -40,6 +40,28 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd()/rndInt(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these time enemy waves and scatter debris
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
+
+  // Uniform integer in [0, n), for array indices.
+  function rndInt(n) { return Math.floor(rnd() * n); }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
 
@@ -75,7 +97,7 @@
 
   // ── Helpers ────────────────────────────────────────────────
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
-  const rand  = (a, b) => a + Math.random() * (b - a);
+  const rand  = (a, b) => a + rnd() * (b - a);
   const wrapX = x => ((x % WORLD_W) + WORLD_W) % WORLD_W;
 
   // Shortest signed distance from a to b around the wrapping world.
@@ -105,7 +127,7 @@
     let h = (lo + hi) / 2;
     let i = 0;
     while (i < TERRAIN_N) {
-      const run   = 2 + Math.floor(Math.random() * 5);
+      const run   = 2 + rndInt(5);
       const slope = rand(-38, 38);
       for (let k = 0; k < run && i < TERRAIN_N; k++, i++) {
         h = clamp(h + slope, lo, hi);
@@ -283,7 +305,7 @@
     camX = wrapX(ship.x - (ship.dir > 0 ? W * 0.35 : W * 0.65));
     addParticles(toScreen(ship.x), ship.y, 14, '#c9f');
     // Faithful to the arcade: re-entry is a gamble.
-    if (Math.random() < 0.18) { killShip(); return; }
+    if (rnd() < 0.18) { killShip(); return; }
     ship.invuln = Math.max(ship.invuln, 0.8);
   }
 
@@ -370,7 +392,7 @@
       baiterTimer -= dt;
       if (baiterTimer <= 0) {
         baiterTimer = Math.max(3, 9 - wave * 0.5);
-        const b = spawnEnemy('baiter', wrapX(ship.x + (Math.random() < 0.5 ? -1 : 1) * W * 0.6), ship.y);
+        const b = spawnEnemy('baiter', wrapX(ship.x + (rnd() < 0.5 ? -1 : 1) * W * 0.6), ship.y);
         b.vx = 0;
       }
     }
@@ -472,7 +494,7 @@
     addFloat(toScreen(en.x), en.y - 14, `+${PTS[en.type] || 0}`, '#ffd');
     if (en.carrying) releaseHuman(en);
     if (en.type === 'pod') {
-      const n = 3 + Math.floor(Math.random() * 3);
+      const n = 3 + rndInt(3);
       for (let i = 0; i < n; i++) spawnEnemy('swarmer', en.x, en.y);
     }
     recordHiScore();
@@ -598,7 +620,7 @@
     if (state !== 'playing') return;
     const sx = toScreen(en.x);
     if (!onScreen(sx)) return;
-    if (Math.random() > ratePerSec * dt * 0.5) return;
+    if (rnd() > ratePerSec * dt * 0.5) return;
     const dx = deltaX(en.x, ship.x), dy = ship.y - en.y;
     const d = Math.hypot(dx, dy) || 1;
     eBullets.push({ x: en.x, y: en.y, vx: dx / d * 255, vy: dy / d * 255, life: 2.4 });
@@ -886,7 +908,7 @@
     ctx.fillStyle = '#d8f6ff';
     ctx.fillRect(-6, -2, 10, 4);
     // Engine flare while accelerating.
-    if ((K.ArrowLeft || K.KeyA || K.ArrowRight || K.KeyD) && Math.random() < 0.8) {
+    if ((K.ArrowLeft || K.KeyA || K.ArrowRight || K.KeyD) && rnd() < 0.8) {
       ctx.fillStyle = '#ffb03a';
       ctx.beginPath();
       ctx.moveTo(-12, -3); ctx.lineTo(-12 - rand(6, 14), 0); ctx.lineTo(-12, 3);

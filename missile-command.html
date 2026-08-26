@@ -40,6 +40,28 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd()/rndInt(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these time warhead waves and pick targets
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
+
+  // Uniform integer in [0, n), for array indices.
+  function rndInt(n) { return Math.floor(rnd() * n); }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
 
@@ -62,8 +84,8 @@
 
   // ── Helpers ────────────────────────────────────────────────
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
-  const rand  = (a, b) => a + Math.random() * (b - a);
-  const pick  = arr => arr[Math.floor(Math.random() * arr.length)];
+  const rand  = (a, b) => a + rnd() * (b - a);
+  const pick  = arr => arr[rndInt(arr.length)];
 
   // ── State ──────────────────────────────────────────────────
   let state = 'title';
@@ -179,7 +201,7 @@
     const speed = 42 + wave * 6;
     spawnQueue = [];
     for (let i = 0; i < count; i++) {
-      spawnQueue.push({ kind: 'icbm', speed: speed * rand(0.85, 1.2), mirv: wave >= 3 && Math.random() < 0.3 });
+      spawnQueue.push({ kind: 'icbm', speed: speed * rand(0.85, 1.2), mirv: wave >= 3 && rnd() < 0.3 });
     }
     if (wave >= 5) {
       const smarts = Math.min(1 + Math.floor((wave - 5) / 2), 4);
@@ -191,7 +213,7 @@
     }
     // Shuffle so the dangerous types are not always last.
     for (let i = spawnQueue.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = rndInt(i + 1);
       [spawnQueue[i], spawnQueue[j]] = [spawnQueue[j], spawnQueue[i]];
     }
     spawnTimer = 0.6;
@@ -212,7 +234,7 @@
 
     if (spec.kind === 'satellite') {
       // Drifts across the sky and lobs missiles rather than diving itself.
-      const dir = Math.random() < 0.5 ? 1 : -1;
+      const dir = rnd() < 0.5 ? 1 : -1;
       incoming.push({
         kind: 'satellite', x: dir > 0 ? -20 : W + 20, y: rand(60, 150),
         vx: spec.speed * dir, vy: 0, alive: true, dropTimer: rand(0.8, 1.8),
@@ -407,7 +429,7 @@
       if (m.mirv && m.y >= m.splitY) {
         m.mirv = false;
         const targets = liveTargets();
-        const n = 2 + Math.floor(Math.random() * 2);
+        const n = 2 + rndInt(2);
         for (let k = 0; k < n && targets.length; k++) {
           const child = { kind: 'icbm', sx: m.x, sy: m.y, x: m.x, y: m.y, alive: true,
                           target: pick(targets), speed: m.speed * rand(0.95, 1.15),

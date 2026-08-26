@@ -39,6 +39,28 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd()/rndInt(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these place mushrooms and time the flea and spider
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
+
+  // Uniform integer in [0, n), for array indices.
+  function rndInt(n) { return Math.floor(rnd() * n); }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
 
@@ -134,8 +156,8 @@
     flea = null; spider = null;
     tickTimer = 0; shootCd = 0;
     invincible   = 2.0;   // 2s of invincibility after spawn
-    fleaTimer    = 15 + Math.random() * 10;
-    spiderTimer  = 12 + Math.random() * 10;
+    fleaTimer    = 15 + rnd() * 10;
+    spiderTimer  = 12 + rnd() * 10;
     levelClearTimer = 0;
   }
 
@@ -151,7 +173,7 @@
     const m = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
     for (let r = 1; r < PZONE; r++)
       for (let c = 0; c < COLS; c++)
-        if (Math.random() < 0.1) m[r][c] = 4;
+        if (rnd() < 0.1) m[r][c] = 4;
     return m;
   }
 
@@ -304,10 +326,10 @@
       let mcount = 0;
       for (let r = 0; r < PZONE; r++) for (let c = 0; c < COLS; c++) if (mushrooms[r][c]) mcount++;
       if (fleaTimer <= 0 || mcount < 6) {
-        flea = { col: Math.floor(Math.random() * COLS), y: -CELL };
+        flea = { col: rndInt(COLS), y: -CELL };
         flea.x = flea.col * CELL + CELL / 2;
         flea.prevRow = -1;
-        fleaTimer = 14 + Math.random() * 10;
+        fleaTimer = 14 + rnd() * 10;
       }
       return;
     }
@@ -319,7 +341,7 @@
     const row = Math.floor(flea.y / CELL);
     if (row !== flea.prevRow) {
       flea.prevRow = row;
-      if (row >= 0 && row < PZONE && !mushrooms[row][flea.col] && Math.random() < 0.40)
+      if (row >= 0 && row < PZONE && !mushrooms[row][flea.col] && rnd() < 0.40)
         mushrooms[row][flea.col] = 4;
     }
 
@@ -346,14 +368,14 @@
     if (!spider) {
       spiderTimer -= dt;
       if (spiderTimer <= 0) {
-        const fromLeft = Math.random() < 0.5;
+        const fromLeft = rnd() < 0.5;
         spider = {
           x:     fromLeft ? -CELL : COLS * CELL + CELL,
-          baseY: (PZONE + 1 + Math.floor(Math.random() * 3)) * CELL + CELL / 2,
+          baseY: (PZONE + 1 + rndInt(3)) * CELL + CELL / 2,
           vx:    fromLeft ? SPD_X : -SPD_X,
           time:  0,
         };
-        spiderTimer = 18 + Math.random() * 14;
+        spiderTimer = 18 + rnd() * 14;
       }
       return;
     }
@@ -397,9 +419,9 @@
 
   function addSparks(x, y, n, color) {
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = 60 + Math.random() * 130;
-      sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.28 + Math.random() * 0.2 });
+      const a = rnd() * Math.PI * 2;
+      const v = 60 + rnd() * 130;
+      sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.28 + rnd() * 0.2 });
     }
   }
 

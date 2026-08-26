@@ -39,6 +39,25 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these scatter the splat particles
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
   const W = 600, H = 650;
@@ -301,9 +320,9 @@
 
   function addBurst(x, y, n, color) {
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
-      const v = 40 + Math.random() * 90;
-      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.5 + Math.random() * 0.45 });
+      const a = (i / n) * Math.PI * 2 + rnd() * 0.4;
+      const v = 40 + rnd() * 90;
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.5 + rnd() * 0.45 });
     }
   }
 

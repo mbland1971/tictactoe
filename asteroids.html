@@ -39,6 +39,28 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd()/rndInt(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these shape asteroids and time the saucer
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
+
+  // Uniform integer in [0, n), for array indices.
+  function rndInt(n) { return Math.floor(rnd() * n); }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
   const W = 600, H = 600;
@@ -63,7 +85,7 @@
   const UFO_SHOOT_INTERVAL = 2.2;  // seconds between ufo shots
 
   // ── Helpers ────────────────────────────────────────────────
-  const rnd  = (lo, hi) => lo + Math.random() * (hi - lo);
+  const rand = (lo, hi) => lo + rnd() * (hi - lo);
   const wrap = v => ((v % 600) + 600) % 600;
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -71,7 +93,7 @@
     const pts = [];
     for (let i = 0; i < n; i++) {
       const a   = (i / n) * Math.PI * 2;
-      const rad = r * (1 - jitter + Math.random() * jitter * 2);
+      const rad = r * (1 - jitter + rnd() * jitter * 2);
       pts.push({ x: cx + Math.cos(a) * rad, y: cy + Math.sin(a) * rad });
     }
     return pts;
@@ -158,7 +180,7 @@
     particles  = [];
     ufo        = null;
     shootCd    = 0;
-    ufoTimer   = rnd(12, 22);
+    ufoTimer   = rand(12, 22);
     ufoShootCd = UFO_SHOOT_INTERVAL;
   }
 
@@ -179,12 +201,12 @@
       ax = x; ay = y;
     } else {
       do {
-        ax = rnd(0, W); ay = rnd(0, H);
+        ax = rand(0, W); ay = rand(0, H);
       } while (Math.hypot(ax - W / 2, ay - H / 2) < 120);
     }
-    const spd   = rnd(25, 75) * (1 + (level - 1) * 0.08);
-    const angle = rnd(0, Math.PI * 2);
-    const sides = 8 + Math.floor(Math.random() * 4);
+    const spd   = rand(25, 75) * (1 + (level - 1) * 0.08);
+    const angle = rand(0, Math.PI * 2);
+    const sides = 8 + rndInt(4);
     return {
       x: ax, y: ay,
       vx: Math.cos(angle) * spd,
@@ -192,8 +214,8 @@
       r:  def.r,
       sizeIdx,
       verts: polyVerts(0, 0, def.r, sides, 0.35),
-      rot: rnd(0, Math.PI * 2),
-      rotSpd: rnd(-0.6, 0.6),
+      rot: rand(0, Math.PI * 2),
+      rotSpd: rand(-0.6, 0.6),
     };
   }
 
@@ -325,10 +347,10 @@
     if (!ufo) {
       ufoTimer -= dt;
       if (ufoTimer <= 0) {
-        const fromLeft = Math.random() < 0.5;
+        const fromLeft = rnd() < 0.5;
         ufo = {
           x:  fromLeft ? -20 : W + 20,
-          y:  rnd(60, H - 60),
+          y:  rand(60, H - 60),
           vx: fromLeft ? UFO_SPD : -UFO_SPD,
           vy: 0,
           wobbleT: 0,
@@ -336,7 +358,7 @@
         };
         ufo.baseY = ufo.y;
         ufoShootCd = UFO_SHOOT_INTERVAL * 0.5;
-        ufoTimer = rnd(18, 30);
+        ufoTimer = rand(18, 30);
       }
       return;
     }
@@ -349,7 +371,7 @@
     ufoShootCd -= dt;
     if (ufoShootCd <= 0) {
       ufoShootCd = UFO_SHOOT_INTERVAL;
-      const ang = Math.atan2(ship.y - ufo.y, ship.x - ufo.x) + rnd(-0.35, 0.35);
+      const ang = Math.atan2(ship.y - ufo.y, ship.x - ufo.x) + rand(-0.35, 0.35);
       const spd = 240;
       astBullets.push({
         x: ufo.x, y: ufo.y,
@@ -393,13 +415,13 @@
   function explode(x, y, size, color) {
     const n = Math.floor(size * 0.8 + 4);
     for (let i = 0; i < n; i++) {
-      const a = rnd(0, Math.PI * 2);
-      const v = rnd(30, 120) * (size / 40 + 0.5);
+      const a = rand(0, Math.PI * 2);
+      const v = rand(30, 120) * (size / 40 + 0.5);
       particles.push({
         x, y,
         vx: Math.cos(a) * v, vy: Math.sin(a) * v,
-        color, life: rnd(0.4, 1.0),
-        size: rnd(1.5, 3.5),
+        color, life: rand(0.4, 1.0),
+        size: rand(1.5, 3.5),
       });
     }
   }
@@ -475,12 +497,12 @@
         ctx.rotate(s.angle);
 
         // Thruster flame
-        if (s.thrusting && Math.random() > 0.35) {
-          ctx.strokeStyle = `rgba(${80 + Math.random() * 80 | 0},${160 + Math.random() * 60 | 0},255,0.9)`;
+        if (s.thrusting && rnd() > 0.35) {
+          ctx.strokeStyle = `rgba(${80 + rnd() * 80 | 0},${160 + rnd() * 60 | 0},255,0.9)`;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.moveTo(-SHIP_RADIUS * 0.4,  SHIP_RADIUS * 0.5);
-          ctx.lineTo(-SHIP_RADIUS * 0.5,  SHIP_RADIUS * 0.5 + rnd(8, 18));
+          ctx.lineTo(-SHIP_RADIUS * 0.5,  SHIP_RADIUS * 0.5 + rand(8, 18));
           ctx.lineTo( SHIP_RADIUS * 0.4,  SHIP_RADIUS * 0.5);
           ctx.stroke();
         }

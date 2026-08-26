@@ -39,6 +39,25 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these scatter the ball off bumpers and slings
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
 
@@ -58,7 +77,7 @@
   const PTS = { bumper: 100, sling: 25, target: 500, bank: 5000, rollover: 250, lanes: 1000 };
 
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
-  const rand  = (a, b) => a + Math.random() * (b - a);
+  const rand  = (a, b) => a + rnd() * (b - a);
 
   // ── Table geometry ─────────────────────────────────────────
   // The table is described as line segments and circles; everything the ball

@@ -39,6 +39,28 @@
 
 <script>
 (() => {
+
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw goes through rnd()/rndInt(), which reads from the platform
+  // CSPRNG instead of Math.random(). Nothing here is a secret — these pick enemy spawns and steer enemy decisions
+  // — but Math.random() is a non-cryptographic PRNG that static analysis
+  // flags wherever it appears, so the file keeps a single audited source of
+  // randomness. Values are drawn 256 at a time so a burst costs one call
+  // into the CSPRNG rather than one per value.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
+
+  // Uniform integer in [0, n), for array indices.
+  function rndInt(n) { return Math.floor(rnd() * n); }
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
   const W = 600, H = 600;
@@ -274,7 +296,7 @@
 
   // ── Enemy AI ───────────────────────────────────────────
   function pickEnemyType() {
-    const r = Math.random();
+    const r = rnd();
     if (level === 1) return 'basic';
     if (level === 2) return r < 0.7 ? 'basic' : 'fast';
     if (r < 0.5) return 'basic';
@@ -283,7 +305,7 @@
   }
 
   function spawnEnemy() {
-    const sp = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
+    const sp = SPAWN_POINTS[rndInt(SPAWN_POINTS.length)];
     const x = sp.x + (TILE - TANK_SIZE) / 2, y = sp.y + (TILE - TANK_SIZE) / 2;
     const rect = { x, y, w: TANK_SIZE, h: TANK_SIZE };
     if (player.alive && rectsOverlap(rect, player)) return;
@@ -292,7 +314,7 @@
     const def = ENEMY_TYPES[type];
     enemies.push({
       x, y, w: TANK_SIZE, h: TANK_SIZE, facing: 'down', moveDir: 'down', alive: true,
-      speed: def.speed, fireRate: def.fireCd, fireCd: def.fireCd * Math.random(),
+      speed: def.speed, fireRate: def.fireCd, fireCd: def.fireCd * rnd(),
       hp: def.hp, maxHp: def.hp, points: def.points, color: def.color, type,
       thinkCd: 0,
     });
@@ -308,7 +330,7 @@
     } else {
       prefs = [dy > 0 ? 'down' : 'up', dx > 0 ? 'right' : 'left', dy > 0 ? 'up' : 'down', dx > 0 ? 'left' : 'right'];
     }
-    if (Math.random() < 0.15) prefs = shuffle(['up', 'down', 'left', 'right']);
+    if (rnd() < 0.15) prefs = shuffle(['up', 'down', 'left', 'right']);
     for (const dir of prefs) {
       const [vx, vy] = DIR_VEC[dir];
       if (!rectVsGrid(en.x + vx * 8, en.y + vy * 8, en.w, en.h)) { en.moveDir = dir; return; }
@@ -318,7 +340,7 @@
 
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = rndInt(i + 1);
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
@@ -342,7 +364,7 @@
 
   function updateEnemy(en, dt) {
     en.thinkCd -= dt;
-    if (en.thinkCd <= 0) { decideMove(en); en.thinkCd = 0.5 + Math.random() * 0.5; }
+    if (en.thinkCd <= 0) { decideMove(en); en.thinkCd = 0.5 + rnd() * 0.5; }
     en.facing = en.moveDir;
     const [vx, vy] = DIR_VEC[en.moveDir];
     const moved = moveTank(en, vx * en.speed * dt, vy * en.speed * dt, [player, ...enemies]);
@@ -375,9 +397,9 @@
   // ── Particles ──────────────────────────────────────────
   function addBurst(x, y, n, color) {
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
-      const v = 40 + Math.random() * 90;
-      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.4 + Math.random() * 0.4 });
+      const a = (i / n) * Math.PI * 2 + rnd() * 0.4;
+      const v = 40 + rnd() * 90;
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, color, life: 0.4 + rnd() * 0.4 });
     }
   }
 
