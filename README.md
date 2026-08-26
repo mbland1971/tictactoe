@@ -1,6 +1,6 @@
 # Arcade Games
 
-Eight classic arcade games that run entirely in the browser — no installation or server required.
+Nine classic arcade games that run entirely in the browser — no installation or server required.
 
 ## Getting Started
 
@@ -329,6 +329,51 @@ sky full of incoming warheads.
 
 ---
 
+## Pinball
+
+An original single-table pinball machine. Keep the ball alive with the flippers, work the
+drop-target banks, and stack the bonus multiplier before you drain.
+
+### How to Play
+
+1. Hold **Space** to pull the plunger back — the longer you hold, the harder the launch — then release to fire the ball onto the table.
+2. Keep the ball in play with the two flippers at the bottom of the table.
+3. Work the drop targets and the top rollover lanes to raise the bonus multiplier, which multiplies everything you score afterwards.
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Arrow Left / A | Left flipper |
+| Arrow Right / D | Right flipper |
+| Space (hold, then release) | Pull and release the plunger |
+| P | Pause / Unpause |
+
+### Rules
+
+- You get **3 balls** per game. The game ends when the third ball drains.
+- Each ball begins with a **7-second ball save**: if the ball drains inside that window it is returned to the plunger lane once, free of charge.
+- **Three pop bumpers** in the upper playfield kick the ball away on contact.
+- **Two slingshots** flank the flippers and snap the ball back up the table.
+- **Six drop targets** sit in two side banks of three. Knocking down all six clears both banks, scores a bonus, **raises the bonus multiplier**, and starts a **3-ball multiball** — once per ball. The banks then reset for another pass.
+- **Three top rollover lanes** light as the ball rolls through them. Lighting all three scores a bonus, **raises the bonus multiplier**, and resets the lanes.
+- The **bonus multiplier** starts at 1× and climbs to a maximum of **5×**. Every point you score is multiplied by it.
+- While **multiball** is active, all scoring is **doubled again** on top of the bonus multiplier. Multiball ends when you are back down to a single ball.
+- Your high score is saved for the session.
+
+### Scoring
+
+| Event | Points (before multiplier) |
+|-------|--------|
+| Pop bumper | 100 |
+| Slingshot | 25 |
+| Drop target | 500 |
+| Clear all six drop targets | 5,000 (+1 bonus multiplier, starts multiball) |
+| Top rollover lane | 250 |
+| Light all three rollover lanes | 1,000 (+1 bonus multiplier) |
+
+---
+
 ## Tech Stack
 
 All games are built with plain HTML, CSS, and vanilla JavaScript — no frameworks or dependencies.
@@ -372,5 +417,6 @@ arcade-games/
 ├── frogger.html          # Single-player Frogger arcade game
 ├── tank.html             # Single-player Tank Battle arcade game
 ├── defender.html         # Single-player Defender arcade game
-└── missile-command.html  # Single-player Missile Command arcade game
+├── missile-command.html  # Single-player Missile Command arcade game
+└── pinball.html          # Single-player Pinball arcade game
 ```
