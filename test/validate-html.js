@@ -31,7 +31,8 @@ const expectedGameFiles = [
   'frogger.html',
   'tank.html',
   'defender.html',
-  'missile-command.html'
+  'missile-command.html',
+  'pinball.html'
 ];
 const localStorageKeyMap = {
   'asteroids.html': 'asteroids_hi',
@@ -40,7 +41,8 @@ const localStorageKeyMap = {
   'frogger.html': 'frogger_hi',
   'tank.html': 'tank_hi',
   'defender.html': 'defender_hi',
-  'missile-command.html': 'missile_hi'
+  'missile-command.html': 'missile_hi',
+  'pinball.html': 'pinball_hi'
 };
 
 function findGameLinks(htmlText) {
@@ -157,6 +159,80 @@ function checkStorageHardening() {
   return issues;
 }
 
+// Pinball is pointer-free but input-heavy: both flippers, the plunger and pause all
+// come from the keyboard, and the HUD ids are read back by name every frame. Guard the
+// whole contract so a rename in one place cannot silently break the game.
+function checkPinball() {
+  const issues = [];
+  const file = 'pinball.html';
+  const filePath = path.join(root, file);
+
+  if (!fs.existsSync(filePath)) {
+    issues.push(`Missing expected game file: ${file}`);
+    return issues;
+  }
+
+  const text = fs.readFileSync(filePath, 'utf8');
+
+  const canvasMatch = text.match(/<canvas[^>]*id="c"[^>]*>/i);
+  if (!canvasMatch) {
+    issues.push(`${file} does not declare a <canvas id="c">.`);
+  } else {
+    const canvasTag = canvasMatch[0];
+    if (!/width="480"/i.test(canvasTag)) {
+      issues.push(`${file} canvas is not 480px wide.`);
+    }
+    if (!/height="720"/i.test(canvasTag)) {
+      issues.push(`${file} canvas is not 720px tall.`);
+    }
+  }
+
+  for (const fnName of ['startGame', 'update', 'draw', 'updateHUD', 'frame']) {
+    if (!text.includes(`function ${fnName}`)) {
+      issues.push(`${file} is missing the lifecycle function ${fnName}().`);
+    }
+  }
+
+  if (!text.includes('requestAnimationFrame')) {
+    issues.push(`${file} does not drive its loop with requestAnimationFrame.`);
+  }
+
+  for (const [code, label] of [
+    ['ArrowLeft', 'left flipper'],
+    ['ArrowRight', 'right flipper'],
+    ['KeyP', 'pause'],
+    ['Space', 'plunger']
+  ]) {
+    if (!text.includes(code)) {
+      issues.push(`${file} never handles ${code} (${label}).`);
+    }
+  }
+
+  for (const id of ['sv', 'bv', 'hv', 'mv']) {
+    if (!text.includes(`id="${id}"`)) {
+      issues.push(`${file} is missing the HUD element id="${id}".`);
+    }
+  }
+
+  // Match the whole card element, not just its opening tag: the href lives on
+  // the anchor but the high-score badge is nested inside it.
+  const indexText = fs.readFileSync(indexPath, 'utf8');
+  const cardMatch = indexText.match(/<a[^>]*class="[^"]*card-pin[^"]*"[\s\S]*?<\/a>/i);
+  if (!cardMatch) {
+    issues.push('index.html has no card-pin card for Pinball.');
+  } else {
+    const card = cardMatch[0];
+    if (!/href="pinball\.html"/i.test(card)) {
+      issues.push('The card-pin card in index.html does not link to pinball.html.');
+    }
+    if (!/data-hikey="pinball_hi"/i.test(card)) {
+      issues.push('The card-pin card in index.html does not read data-hikey="pinball_hi".');
+    }
+  }
+
+  return issues;
+}
+
 function verifyGameFilesExist() {
   return expectedGameFiles.filter((file) => !fs.existsSync(path.join(root, file)));
 }
@@ -167,6 +243,7 @@ repoIssues.push(...checkLocalStorageKeys());
 repoIssues.push(...checkLauncherHiKeys());
 repoIssues.push(...checkContentSecurityPolicy());
 repoIssues.push(...checkStorageHardening());
+repoIssues.push(...checkPinball());
 repoIssues.push(...verifyGameFilesExist().map((file) => `Missing expected game file: ${file}`));
 
 if (repoIssues.length > 0) {
