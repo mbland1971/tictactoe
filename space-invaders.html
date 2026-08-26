@@ -82,6 +82,29 @@
   let levelClearTimer;
   let prevTs = 0;
 
+  // ── Randomness ─────────────────────────────────────────
+  // Every random draw in this game goes through rnd()/rndInt(), which read
+  // from the platform CSPRNG instead of Math.random(). Nothing here is a
+  // secret — these pick particle angles and saucer timings — but Math.random()
+  // is a non-cryptographic PRNG that static analysis flags wherever it
+  // appears, so the file keeps a single audited source of randomness.
+  // Values are drawn 256 at a time so a particle burst costs one call into
+  // the CSPRNG rather than one per draw.
+  const RND_POOL = new Uint32Array(256);
+  let rndIdx = RND_POOL.length;
+
+  function rnd() {
+    if (rndIdx >= RND_POOL.length) {
+      crypto.getRandomValues(RND_POOL);
+      rndIdx = 0;
+    }
+    // Dividing by 2**32 gives [0, 1) — the same range Math.random() returns.
+    return RND_POOL[rndIdx++] / 4294967296;
+  }
+
+  // Uniform integer in [0, n), for array indices.
+  function rndInt(n) { return Math.floor(rnd() * n); }
+
   // ── High score storage ─────────────────────────────────────
   // localStorage is user-writable and can be absent entirely (private
   // browsing, blocked cookies, sandboxed iframe), so every read is validated
@@ -168,7 +191,7 @@
     particles  = []; floats = [];
     shootCd    = 0;
     saucer     = null;
-    saucerTimer = 18 + Math.random() * 14;
+    saucerTimer = 18 + rnd() * 14;
   }
 
   function buildShields() {
@@ -346,13 +369,13 @@
   function invaderShoot(dt) {
     invShootTimer -= dt;
     if (invShootTimer > 0) return;
-    invShootTimer = Math.max(0.3, INV_SHOOT_BASE - (level - 1) * 0.1) * (0.5 + Math.random());
+    invShootTimer = Math.max(0.3, INV_SHOOT_BASE - (level - 1) * 0.1) * (0.5 + rnd());
 
     // Pick a random invader in the bottom-most occupied column
     const alive = invaders.filter(i => i.alive);
     if (!alive.length) return;
     const cols = [...new Set(alive.map(i => i.col))];
-    const col  = cols[Math.floor(Math.random() * cols.length)];
+    const col  = cols[rndInt(cols.length)];
     const shooters = alive.filter(i => i.col === col);
     const shooter  = shooters.reduce((a, b) => a.row > b.row ? a : b);
     invBullets.push({
@@ -411,9 +434,9 @@
     if (!saucer) {
       saucerTimer -= dt;
       if (saucerTimer <= 0) {
-        const fromLeft = Math.random() < 0.5;
+        const fromLeft = rnd() < 0.5;
         saucer = { x: fromLeft ? -30 : W + 30, vx: fromLeft ? SAUCER_SPD : -SAUCER_SPD };
-        saucerTimer = 22 + Math.random() * 18;
+        saucerTimer = 22 + rnd() * 18;
       }
       return;
     }
@@ -423,7 +446,7 @@
     // Player bullet vs saucer
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
       if (Math.hypot(bullets[bi].x - saucer.x, bullets[bi].y - 28) < 20) {
-        const pts = SAUCER_PTS[Math.floor(Math.random() * SAUCER_PTS.length)];
+        const pts = SAUCER_PTS[rndInt(SAUCER_PTS.length)];
         score += pts;
         addFloat(saucer.x, 28, `+${pts}`, '#f6a');
         addParticles(saucer.x, 28, 12, '#f6a');
@@ -453,9 +476,9 @@
 
   function addParticles(x, y, n, color) {
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = 40 + Math.random() * 100;
-      particles.push({ x, y, vx: Math.cos(a)*v, vy: Math.sin(a)*v, color, life: 0.3 + Math.random()*0.3, size: 1.5 + Math.random()*2 });
+      const a = rnd() * Math.PI * 2;
+      const v = 40 + rnd() * 100;
+      particles.push({ x, y, vx: Math.cos(a)*v, vy: Math.sin(a)*v, color, life: 0.3 + rnd()*0.3, size: 1.5 + rnd()*2 });
     }
   }
 
