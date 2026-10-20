@@ -233,6 +233,133 @@ function checkPinball() {
   return issues;
 }
 
+// Strip JS and CSS comments so the convention's own explanatory comments — which
+// name Math.random deliberately — do not read as violations. Newlines are kept so
+// reported line numbers still line up with the file. Walks the text rather than
+// regexing it, so a "//" inside a string literal is not taken for a comment.
+function stripComments(src) {
+  let out = '';
+  let mode = 'code';   // code | line | block | sq | dq | tpl
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (mode === 'code') {
+      if (c === '/' && d === '/') { mode = 'line'; i += 2; continue; }
+      if (c === '/' && d === '*') { mode = 'block'; i += 2; continue; }
+      if (c === "'") mode = 'sq';
+      else if (c === '"') mode = 'dq';
+      else if (c === '`') mode = 'tpl';
+      out += c; i += 1; continue;
+    }
+    if (mode === 'line') {
+      if (c === '\n') { mode = 'code'; out += c; }
+      i += 1; continue;
+    }
+    if (mode === 'block') {
+      if (c === '*' && d === '/') { mode = 'code'; i += 2; continue; }
+      if (c === '\n') out += c;
+      i += 1; continue;
+    }
+    // inside a string literal
+    if (c === '\\') { out += c + (d === undefined ? '' : d); i += 2; continue; }
+    if ((mode === 'sq' && c === "'") || (mode === 'dq' && c === '"') || (mode === 'tpl' && c === '`')) {
+      mode = 'code';
+    }
+    out += c; i += 1;
+  }
+  return out;
+}
+
+// Return each <script> body with its JS comments blanked out, as one string per
+// file whose line numbering still matches the original. Only script bodies are
+// scanned: the surrounding HTML and CSS are not JavaScript, and an apostrophe in
+// ordinary markup would otherwise be read as the start of a string literal.
+function scriptCodeOf(text) {
+  let out = text.replace(/[^\n]/g, ' ');   // blank canvas, newlines preserved
+  const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const body = m[1];
+    const at = m.index + m[0].indexOf(body);
+    const stripped = stripJsComments(body);
+    out = out.slice(0, at) + stripped + out.slice(at + stripped.length);
+  }
+  return out;
+}
+
+// Blank out JS comments so the convention's own explanatory comments — which name
+// Math.random deliberately — do not read as violations. Newlines and length are
+// preserved so reported line numbers still line up with the file. Walks the text
+// rather than regexing it, so a "//" inside a string literal is left alone.
+function stripJsComments(src) {
+  let out = '';
+  let mode = 'code';   // code | line | block | sq | dq | tpl
+  let i = 0;
+  const keep = (c) => (c === '\n' ? '\n' : ' ');
+  while (i < src.length) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (mode === 'code') {
+      if (c === '/' && d === '/') { mode = 'line'; out += '  '; i += 2; continue; }
+      if (c === '/' && d === '*') { mode = 'block'; out += '  '; i += 2; continue; }
+      if (c === "'") mode = 'sq';
+      else if (c === '"') mode = 'dq';
+      else if (c === '`') mode = 'tpl';
+      out += c; i += 1; continue;
+    }
+    if (mode === 'line') {
+      if (c === '\n') mode = 'code';
+      out += keep(c); i += 1; continue;
+    }
+    if (mode === 'block') {
+      if (c === '*' && d === '/') { mode = 'code'; out += '  '; i += 2; continue; }
+      out += keep(c); i += 1; continue;
+    }
+    // inside a string literal
+    if (c === '\\') { out += c + (d === undefined ? '' : d); i += 2; continue; }
+    if ((mode === 'sq' && c === "'") || (mode === 'dq' && c === '"') || (mode === 'tpl' && c === '`')) {
+      mode = 'code';
+    }
+    out += c; i += 1;
+  }
+  return out;
+}
+
+// No page may call Math.random(). It is a non-cryptographic PRNG that CodeQL's
+// js/insecure-randomness flags wherever it appears, so every page draws from one
+// audited rnd() helper backed by crypto.getRandomValues instead. This was a
+// documented convention with nothing enforcing it.
+function checkRandomnessSource() {
+  const issues = [];
+  for (const file of htmlFiles) {
+    const code = scriptCodeOf(fs.readFileSync(path.join(root, file), 'utf8'));
+
+    const calls = [...code.matchAll(/Math\.random\s*\(/g)];
+    if (calls.length > 0) {
+      const lines = calls.map((m) => code.slice(0, m.index).split('\n').length);
+      issues.push(
+        `${file} calls Math.random() on line(s) ${lines.join(', ')}; ` +
+        "draw from the page's rnd() helper instead."
+      );
+    }
+
+    // A page that needs randomness must define exactly one source for it, and
+    // that source must come from the platform CSPRNG.
+    const defs = [...code.matchAll(/function rnd\s*\(/g)].length;
+    if (defs > 1) {
+      issues.push(`${file} defines rnd() ${defs} times; keep a single source of randomness.`);
+    }
+    if (defs === 1 && !code.includes('crypto.getRandomValues')) {
+      issues.push(`${file} defines rnd() but never reads crypto.getRandomValues.`);
+    }
+    if (defs === 0 && code.includes('crypto.getRandomValues')) {
+      issues.push(`${file} reads crypto.getRandomValues outside an rnd() helper.`);
+    }
+  }
+  return issues;
+}
+
 function verifyGameFilesExist() {
   return expectedGameFiles.filter((file) => !fs.existsSync(path.join(root, file)));
 }
@@ -244,6 +371,7 @@ repoIssues.push(...checkLauncherHiKeys());
 repoIssues.push(...checkContentSecurityPolicy());
 repoIssues.push(...checkStorageHardening());
 repoIssues.push(...checkPinball());
+repoIssues.push(...checkRandomnessSource());
 repoIssues.push(...verifyGameFilesExist().map((file) => `Missing expected game file: ${file}`));
 
 if (repoIssues.length > 0) {

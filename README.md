@@ -15,17 +15,28 @@ A two-player Tic Tac Toe game for two people on the same device.
 ### How to Play
 
 1. Players take turns clicking cells on the 3×3 grid.
-2. **Player X** always goes first.
+2. **Player X** opens the first round. After that the **loser of the previous round opens**, in both two-player and vs-Computer mode — so the computer does sometimes move first.
 3. The first player to get three marks in a row (horizontally, vertically, or diagonally) wins.
 4. If all 9 cells are filled with no winner, the game is a draw.
 5. Click **New Game** to reset the board. Scores carry over between rounds.
 
+### Controls
+
+| Key | Action |
+|-----|--------|
+| Mouse | Click a cell |
+| Tab / Shift-Tab | Move between cells |
+| Enter or Space | Place your mark on the focused cell |
+| 7 8 9 / 4 5 6 / 1 2 3 | Place directly, numpad-style |
+
 ### Features
 
 - Two-player local play (same device, alternating turns)
+- **vs Computer** mode with an unbeatable minimax AI — the best you can do is draw
 - Win and draw detection
 - Winning cells highlighted at the end of each round
 - Scoreboard tracking wins for X, O, and draws
+- Fully keyboard operable: the cells are real buttons, and the turn and result are announced to screen readers
 
 ---
 
@@ -50,11 +61,14 @@ A browser remake of the classic Atari arcade game. Destroy the centipede before 
 
 - The centipede starts at the top and winds its way down through the mushroom field, reversing direction each time it hits a wall or mushroom.
 - **Shoot centipede segments** to destroy them. A hit segment turns into a mushroom.
-- Hitting the **head** is worth **100 points**; hitting a **body segment** is worth **10 points**.
-- **Destroying a mushroom** is worth **5 points**.
-- If the centipede reaches you or touches your cannon, you lose a life.
-- You start with **3 lives**. The game ends when all lives are lost.
-- Each level the centipede gets longer and faster.
+- You can only have **one shot in the air** at a time.
+- A **mushroom** takes four hits to clear.
+- A **flea** drops down the screen when the field thins out, leaving mushrooms behind it. It takes **two hits** — the first only makes it fall faster.
+- A **spider** bounces through the player zone eating mushrooms. It is worth more the closer it is when you hit it.
+- A **scorpion** crosses the mushroom field from level 2, **poisoning** every mushroom it passes. Poisoned mushrooms are tinted magenta — a centipede that bumps one **dives straight down at you**, so clear the trail before it finds it.
+- If the centipede, flea or spider touches your cannon, you lose a life.
+- You start with **3 lives** and earn an **extra cannon every 12,000 points**.
+- Each level the centipede gets faster.
 - Your high score is tracked for the session.
 
 ### Scoring
@@ -63,8 +77,12 @@ A browser remake of the classic Atari arcade game. Destroy the centipede before 
 |-------|--------|
 | Hit centipede head | 100 |
 | Hit body segment | 10 |
-| Destroy mushroom | 5 |
+| Destroy mushroom | 1 |
+| Shoot the flea (second hit) | 200 |
+| Shoot the spider | 300 / 600 / 900 by range |
+| Shoot the scorpion | 1,000 |
 | Clear a level | 1,000 bonus |
+| Extra cannon | every 12,000 points |
 
 ---
 
@@ -85,6 +103,7 @@ A browser remake of the classic Atari vector-graphics arcade game. Pilot your sh
 | Arrow Right / D | Rotate right |
 | Arrow Up / W | Thrust |
 | Space | Fire |
+| H | Hyperspace |
 | P | Pause / Unpause |
 
 ### Rules
@@ -92,11 +111,14 @@ A browser remake of the classic Atari vector-graphics arcade game. Pilot your sh
 - **Large asteroids** split into 2 medium ones when shot.
 - **Medium asteroids** split into 2 small ones when shot.
 - **Small asteroids** are destroyed outright.
-- Clear all asteroids to advance to the next level — more asteroids spawn each level.
-- A **UFO** occasionally flies across the screen and shoots at you. Destroy it for bonus points.
-- Crashing into an asteroid or UFO (or being hit by a UFO bullet) costs a life.
-- You start with **3 lives**. The game ends when all lives are lost.
-- Your ship wraps around the screen edges.
+- Fragments **inherit the momentum** of the rock they came from, and each size flies faster than the one above it — a split sprays along the parent's course.
+- You can have **four shots in the air** at a time.
+- **Hyperspace** (H) jumps you somewhere else on the screen. It is a gamble: roughly **1 jump in 7 destroys the ship**.
+- Two **saucers** cross the screen. The large one sprays shots more or less at random; the small one is faster and shoots far more accurately, and becomes more common as your score climbs.
+- Crashing into an asteroid or saucer (or being hit by a saucer's shot) costs a life.
+- You start with **3 lives** and earn an **extra ship every 10,000 points**.
+- Everything — ship, rocks, shots and saucers — **wraps around the screen edges**, and collides across them.
+- After losing a ship, the next one waits until the centre of the screen is clear.
 - Your high score is saved for the session.
 
 ### Scoring
@@ -106,8 +128,10 @@ A browser remake of the classic Atari vector-graphics arcade game. Pilot your sh
 | Destroy large asteroid | 20 |
 | Destroy medium asteroid | 50 |
 | Destroy small asteroid | 100 |
-| Destroy UFO | 200 |
+| Destroy large saucer | 200 |
+| Destroy small saucer | 1,000 |
 | Clear a level | 1,000 bonus |
+| Extra ship | every 10,000 points |
 
 ---
 
@@ -132,23 +156,24 @@ A browser remake of the classic Taito arcade game. Defend Earth from waves of de
 ### Rules
 
 - The invader grid marches sideways, dropping one row each time it reaches a wall — and speeding up as aliens are destroyed.
-- **Three alien types** are arranged in rows, each worth different point values.
-- You can only have **one bullet in the air** at a time.
-- Four **shields** protect you but erode when hit by your shots or enemy fire, and are destroyed when invaders march over them.
-- A **mystery saucer** occasionally flies across the top of the screen for a random bonus.
+- **Three alien types** are arranged in rows, each worth different point values: the small **squid** on top, **crabs** in the middle two rows, the broad **octopus** at the bottom.
+- You can only have **one bullet in the air** at a time; the invaders are limited to **three shots** between them.
+- Four **shields** protect you but erode when hit by your shots or enemy fire, and are eaten away by invaders marching over them.
+- A **mystery saucer** crosses the top of the screen. Its value is not random: it follows the arcade's fixed table indexed by the number of shots you have fired, so the **23rd shot — and every 15th after it — is worth 300**.
 - If any invader reaches the cannon's row, the invasion succeeds and the game ends immediately — remaining lives do not save you.
-- You start with **3 lives**. The game also ends when all lives are lost to enemy fire.
+- You start with **3 lives** and earn an **extra cannon at 1,500 points**. The game also ends when all lives are lost to enemy fire.
 - Your high score is saved for the session.
 
 ### Scoring
 
 | Event | Points |
 |-------|--------|
-| Squid (bottom 2 rows) | 10 |
+| Octopus (bottom 2 rows) | 10 |
 | Crab (middle 2 rows) | 20 |
-| Octopus (top row) | 30 |
-| Mystery saucer | 50 / 100 / 150 / 300 (random) |
+| Squid (top row) | 30 |
+| Mystery saucer | 50 / 100 / 150 / 300 by shot count |
 | Clear a wave | 1,000 bonus |
+| Extra cannon | at 1,500 points |
 
 ---
 
@@ -171,11 +196,15 @@ A browser remake of the classic Konami arcade game. Guide your frog safely acros
 ### Rules
 
 - You have **30 seconds** per frog. The timer bar at the bottom shows time remaining.
-- **Road** (rows 7–11): five lanes of cars and trucks moving in alternating directions. Getting hit costs a life.
-- **River** (rows 1–5): five lanes of logs moving in alternating directions. You must hop onto a log and ride it — stepping into open water is instant death. If a log carries you off the edge of the screen, you also die.
-- **Median** (row 6) and the **start zone** (row 12) are safe.
-- Landing on an already-claimed lily pad or between lily pads in the goal row costs a life.
-- You start with **3 lives**. The game ends when all lives are lost.
+- **Road** (rows 7–11): five lanes of cars and trucks moving in alternating directions. Getting hit costs a life. Traffic is spaced irregularly, so the gaps are not on a fixed rhythm.
+- **River** (rows 1–5): three lanes of **logs** and two of **turtles**, moving in alternating directions. You must ride something across — stepping into open water is instant death, and being carried off the edge of the screen also kills you.
+- **Turtle groups dive.** They surface, bob as a warning, then submerge; a submerged group will not carry you, so a route that worked a moment ago will drown you.
+- **Median** (row 6) is safe on level 1, but from level 2 a **snake** patrols it.
+- Landing on an already-claimed lily pad, or between pads in the goal row, costs a life.
+- From level 2 a **crocodile** lurks in one unclaimed lily pad, moving between pads over time. Its open jaws are fatal — the pads it has left are not.
+- A **fly** sometimes lands on a free pad. Reach that pad to eat it for **200 points**.
+- A **lady frog** rides in on a river log. Hop onto her to pick her up and she rides on your back; deliver her to a pad for **200 points** extra. Losing a life loses her.
+- You start with **3 lives** and earn an **extra frog every 10,000 points**.
 - Each level the lanes speed up by 15%.
 - Your high score is saved for the session.
 
@@ -185,7 +214,10 @@ A browser remake of the classic Konami arcade game. Guide your frog safely acros
 |-------|--------|
 | Advance to a row not yet reached this life | 10 |
 | Reach a lily pad | 50 + time bonus (10 × seconds remaining) |
+| Eat a fly on the pad you reach | 200 |
+| Arrive with the lady frog | 200 |
 | Clear a level (all 5 pads) | 1,000 bonus |
+| Extra frog | every 10,000 points |
 
 ---
 
@@ -209,14 +241,16 @@ A single-player tank battle game. Fight your way through waves of enemy tanks in
 ### Rules
 
 - The arena is a 15×15 grid of 40px tiles, surrounded by indestructible **steel walls** (also forming a central fortress).
+- **Your base — the eagle — sits at the bottom centre** in a nest of brick. **If it is destroyed the game ends immediately**, however many lives you have left. Defending it is the point of the level.
+- Either side's shell will destroy the base, so mind your own line of fire.
 - **Brick walls** are destructible — shoot them to open new paths. Steel walls block shells without breaking.
 - Moving (even into a blocked wall) rotates your tank to face that direction, so you can aim while pressed against a wall.
 - Your shells destroy brick walls and enemy tanks on contact.
-- Getting hit by an enemy shell or colliding with an enemy tank costs a life. You respawn at the starting position with ~1.6 seconds of flashing invulnerability.
-- You start with **3 lives**. The game ends when all lives are lost.
+- Getting hit by an enemy shell or colliding with an enemy tank costs a life. You respawn beside the base with ~1.6 seconds of flashing invulnerability.
+- You start with **3 lives** and earn an **extra tank every 20,000 points**.
 - Each level has a pool of enemy tanks — `4 + (level − 1) × 2`, capped at 14 — with at most 3 active on the field at once. Destroyed tanks are replaced from the pool until it's empty.
 - Clearing all enemies in a level advances you to the next level with more enemies and a harder mix of types.
-- Enemy tanks navigate toward your position, avoiding walls (with some randomness to avoid getting stuck), and fire when they have a clear line of sight along a row or column.
+- Enemy tanks are assigned a target when they spawn: about **60% drive for the base** and the rest hunt you. They fire when they have a clear line along a row or column, shoot **through brick to reach the base**, and blast brick that blocks their path.
 - Enemy types are introduced progressively: basic only on level 1; basic and fast from level 2; all three types possible from level 3 onward.
 - Your high score is saved for the session.
 
@@ -228,6 +262,7 @@ A single-player tank battle game. Fight your way through waves of enemy tanks in
 | Destroy fast tank (yellow, 1 hit) | 200 |
 | Destroy heavy tank (purple, 2 hits) | 300 |
 | Clear a level | 1,000 bonus |
+| Extra tank | every 20,000 points |
 
 ---
 
@@ -267,6 +302,7 @@ landers from carrying off your humanoids.
 - A **smart bomb** destroys everything currently on screen. **Hyperspace** jumps you somewhere else on the planet, but roughly one jump in five is fatal.
 - Colliding with any enemy, flying into the ground, or being shot costs a life.
 - You start with **3 lives** and **3 smart bombs**, and earn one extra bomb per wave (up to 6).
+- Every **10,000 points** awards **both an extra ship and an extra smart bomb**, as the arcade does.
 
 ### Scoring
 
@@ -281,6 +317,7 @@ landers from carrying off your humanoids.
 | Catch a falling humanoid | 250 |
 | Return a humanoid to the surface | 500 |
 | Each humanoid alive at the end of a wave | 100 × wave number |
+| Extra ship **and** smart bomb | every 10,000 points |
 
 ---
 
@@ -347,6 +384,7 @@ drop-target banks, and stack the bonus multiplier before you drain.
 | Arrow Left / A | Left flipper |
 | Arrow Right / D | Right flipper |
 | Space (hold, then release) | Pull and release the plunger |
+| Arrow Up / W | Nudge the table |
 | P | Pause / Unpause |
 
 ### Rules
@@ -357,8 +395,11 @@ drop-target banks, and stack the bonus multiplier before you drain.
 - **Two slingshots** flank the flippers and snap the ball back up the table.
 - **Six drop targets** sit in two side banks of three. Knocking down all six clears both banks, scores a bonus, **raises the bonus multiplier**, and starts a **3-ball multiball** — once per ball. The banks then reset for another pass.
 - **Three top rollover lanes** light as the ball rolls through them. Lighting all three scores a bonus, **raises the bonus multiplier**, and resets the lanes.
-- The **bonus multiplier** starts at 1× and climbs to a maximum of **5×**. Every point you score is multiplied by it.
+- The **bonus multiplier** starts at 1× and climbs to a maximum of **5×**. Every point you score is multiplied by it. Like the bonus itself it belongs to the ball, and **resets when the next ball is served**.
+- Targets, lanes and bank clears also build an **end-of-ball bonus**, shown at the bottom of the table. It is paid out when the ball drains, multiplied by the bonus multiplier you reached on that ball.
 - While **multiball** is active, all scoring is **doubled again** on top of the bonus multiplier. Multiball ends when you are back down to a single ball.
+- **Nudging** (Up or W) shoves the ball to save a drain. Three shoves in quick succession **tilts** the table, which kills the flippers and forfeits the bonus for that ball. Warnings fade if you keep your hands off.
+- The plunger works across its whole travel — even the lightest tap puts the ball onto the table, and holding longer sends it deeper in.
 - Your high score is saved for the session.
 
 ### Scoring
@@ -371,6 +412,10 @@ drop-target banks, and stack the bonus multiplier before you drain.
 | Clear all six drop targets | 5,000 (+1 bonus multiplier, starts multiball) |
 | Top rollover lane | 250 |
 | Light all three rollover lanes | 1,000 (+1 bonus multiplier) |
+| End-of-ball bonus | 250 × bonus units × multiplier |
+
+Bonus units accrue at 1 per drop target, 2 per rollover lane, 4 for lighting all
+three lanes and 5 for clearing a bank.
 
 ---
 
@@ -391,6 +436,14 @@ This repository includes built-in validation tooling for the HTML files.
 - `npm install` to install dev dependencies.
 - `npm test` runs HTML validation via `html-validate`.
 - `npm run validate` runs the dedicated validation agent in `test/validate-html.js`.
+
+Beyond markup linting, `test/validate-html.js` also enforces the repository's
+conventions: that every expected game file exists and is linked from
+`index.html`, that each game's high-score `localStorage` key matches the one the
+launcher reads, that stored scores are validated and every access guarded, that
+every page ships a restrictive `Content-Security-Policy`, and that **no page calls
+`Math.random()`** — each one draws from a single `rnd()` helper backed by
+`crypto.getRandomValues`.
 
 A GitHub Actions workflow is included at `.github/workflows/ci.yml` to run the validation on push and pull requests.
 
