@@ -59,8 +59,17 @@
       font-size: 3.2rem; font-weight: bold;
       transition: background 0.15s;
       user-select: none;
+      /* The cells are <button>s so they are reachable by Tab and Enter;
+         these reset the control back to the plain tile it looks like. */
+      border: none; font-family: inherit; color: inherit;
+      appearance: none; -webkit-appearance: none;
     }
-    .cell:hover:not(.taken) { background: #0f3460; }
+    .cell:hover:not(.taken):not(:disabled) { background: #0f3460; }
+    .cell:disabled { cursor: default; }
+    /* focus-visible, not focus, so a mouse click does not leave a ring behind */
+    .cell:focus-visible, .mode-btn:focus-visible, .btn:focus-visible {
+      outline: 2px solid #4ecdc4; outline-offset: 3px;
+    }
     .cell.x { color: #ff6b6b; }
     .cell.o { color: #4ecdc4; }
     .cell .mark { display: block; }
@@ -103,8 +112,8 @@
   <h1>Tic Tac Toe</h1>
 
   <div class="mode-toggle">
-    <button type="button" class="mode-btn active" id="btn-2p">2 Players</button>
-    <button type="button" class="mode-btn"        id="btn-ai">vs Computer</button>
+    <button type="button" class="mode-btn active" id="btn-2p" aria-pressed="true">2 Players</button>
+    <button type="button" class="mode-btn"        id="btn-ai" aria-pressed="false">vs Computer</button>
   </div>
 
   <div class="scoreboard">
@@ -122,13 +131,13 @@
     </div>
   </div>
 
-  <div class="status" id="status">Player X's turn</div>
+  <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true">Player X's turn</div>
 
   <div class="board-wrap">
-    <div class="board" id="board">
-      <div class="cell" data-i="0"></div><div class="cell" data-i="1"></div><div class="cell" data-i="2"></div>
-      <div class="cell" data-i="3"></div><div class="cell" data-i="4"></div><div class="cell" data-i="5"></div>
-      <div class="cell" data-i="6"></div><div class="cell" data-i="7"></div><div class="cell" data-i="8"></div>
+    <div class="board" id="board" role="group" aria-label="Tic Tac Toe board">
+      <button type="button" class="cell" data-i="0" aria-label="Row 1, column 1, empty"></button><button type="button" class="cell" data-i="1" aria-label="Row 1, column 2, empty"></button><button type="button" class="cell" data-i="2" aria-label="Row 1, column 3, empty"></button>
+      <button type="button" class="cell" data-i="3" aria-label="Row 2, column 1, empty"></button><button type="button" class="cell" data-i="4" aria-label="Row 2, column 2, empty"></button><button type="button" class="cell" data-i="5" aria-label="Row 2, column 3, empty"></button>
+      <button type="button" class="cell" data-i="6" aria-label="Row 3, column 1, empty"></button><button type="button" class="cell" data-i="7" aria-label="Row 3, column 2, empty"></button><button type="button" class="cell" data-i="8" aria-label="Row 3, column 3, empty"></button>
     </div>
     <svg class="win-svg" id="win-svg" viewBox="0 0 346 346">
       <line id="win-line" x1="0" y1="0" x2="0" y2="0"/>
@@ -182,6 +191,28 @@
 
   // Marks are written as text, never as markup — the cell content is never
   // an HTML sink, regardless of what ends up in the board array.
+  // Screen readers get the grid position and contents of every cell; the
+  // visible glyph alone ("X") says nothing about where it sits.
+  function describeCell(i, value) {
+    return `Row ${Math.floor(i / 3) + 1}, column ${(i % 3) + 1}, ${value || 'empty'}`;
+  }
+
+  // Taken cells are disabled, which drops them from the tab order — and if the
+  // player had just activated one with the keyboard, the browser would strand
+  // focus on <body>. Hand it to the next cell still in play instead.
+  // A finished game leaves empty cells on the board; without this they stay in
+  // the tab order as buttons that silently do nothing.
+  function lockBoard() {
+    document.querySelectorAll('.cell').forEach(cell => { cell.disabled = true; });
+  }
+
+  function restoreFocus() {
+    for (const cell of document.querySelectorAll('.cell')) {
+      if (!cell.disabled) { cell.focus(); return; }
+    }
+    document.getElementById('restart').focus();
+  }
+
   function setMark(cell, value) {
     cell.textContent = '';
     if (!value) return;
@@ -195,6 +226,8 @@
     document.querySelectorAll('.cell').forEach((cell, i) => {
       const v = board[i];
       cell.className = 'cell' + (v ? ' taken ' + v.toLowerCase() : '');
+      cell.setAttribute('aria-label', describeCell(i, v));
+      cell.disabled = !!v || gameOver;
       setMark(cell, v);
     });
 
@@ -222,10 +255,14 @@
   function commit(i) {
     board[i] = current;
     const cell = document.querySelectorAll('.cell')[i];
+    const wasFocused = document.activeElement === cell;
     cell.className = `cell taken just-placed ${current.toLowerCase()}`;
+    cell.setAttribute('aria-label', describeCell(i, current));
+    cell.disabled = true;
     setMark(cell, current);
     setTimeout(() => cell.classList.remove('just-placed'), 220);
     resolve();
+    if (wasFocused) restoreFocus();
   }
 
   function resolve() {
@@ -234,7 +271,10 @@
       if (board[a] && board[a] === board[b] && board[a] === board[c]) {
         gameOver = true;
         scores[current]++;
-        if (mode === '2p') nextFirst = current === 'X' ? 'O' : 'X';
+        // The loser opens the next round — in both modes. Pinning this to '2p'
+        // meant the human always moved first against the computer, and against
+        // perfect minimax that is a draw or a loss every single game.
+        nextFirst = current === 'X' ? 'O' : 'X';
 
         WINS[w].forEach(idx => document.querySelectorAll('.cell')[idx].classList.add('winning'));
 
@@ -251,18 +291,20 @@
         document.getElementById(`score-${current.toLowerCase()}`).textContent = scores[current];
         document.getElementById('si-x').classList.remove('active-turn');
         document.getElementById('si-o').classList.remove('active-turn');
+        lockBoard();
         return;
       }
     }
 
     if (board.every(Boolean)) {
       gameOver = true; scores.draw++;
-      if (mode === '2p') nextFirst = nextFirst === 'X' ? 'O' : 'X';
+      nextFirst = nextFirst === 'X' ? 'O' : 'X';
       const st = document.getElementById('status');
       st.textContent = "It's a draw!"; st.className = 'status win';
       document.getElementById('score-draw').textContent = scores.draw;
       document.getElementById('si-x').classList.remove('active-turn');
       document.getElementById('si-o').classList.remove('active-turn');
+      lockBoard();
       return;
     }
 
@@ -345,6 +387,8 @@
     mode = '2p'; scores = null; nextFirst = 'X';
     document.getElementById('btn-2p').classList.add('active');
     document.getElementById('btn-ai').classList.remove('active');
+    document.getElementById('btn-2p').setAttribute('aria-pressed', 'true');
+    document.getElementById('btn-ai').setAttribute('aria-pressed', 'false');
     init();
   });
   document.getElementById('btn-ai').addEventListener('click', () => {
@@ -352,6 +396,8 @@
     mode = 'ai'; scores = null; nextFirst = 'X';
     document.getElementById('btn-ai').classList.add('active');
     document.getElementById('btn-2p').classList.remove('active');
+    document.getElementById('btn-ai').setAttribute('aria-pressed', 'true');
+    document.getElementById('btn-2p').setAttribute('aria-pressed', 'false');
     init();
   });
 

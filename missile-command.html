@@ -509,8 +509,10 @@
     const saved     = cities.filter(c => c.alive).length;
     const ammoPts   = ammoLeft * PTS.ammo * multiplier;
     const cityPts   = saved * PTS.city * multiplier;
-    score += ammoPts + cityPts;
-    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    // Routed through addScore (rather than touching `score` directly) so a
+    // tally that carries the total past a 10,000 boundary still awards the
+    // bonus city it earned. addScore applies the multiplier itself.
+    addScore(ammoLeft * PTS.ammo + saved * PTS.city);
     bonusLines = [
       `UNUSED MISSILES  ${ammoLeft} × ${PTS.ammo} × ${multiplier}  =  ${ammoPts}`,
       `CITIES SAVED     ${saved} × ${PTS.city} × ${multiplier}  =  ${cityPts}`,
