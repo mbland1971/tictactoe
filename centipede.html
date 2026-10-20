@@ -70,6 +70,13 @@
   const PZONE  = 25;       // player zone starts at row 25
   const BASE_MS = 110;     // ms per centipede step at level 1
 
+  const EXTRA_LIFE_EVERY = 12000;   // bonus cannon per 12,000 points
+
+  // Points. Mushrooms are worth 1 in the arcade, not 5.
+  const PTS = { head: 100, body: 10, mushroom: 1, flea: 200, scorpion: 1000 };
+  // The spider is worth more the closer it is when you hit it.
+  const SPIDER_PTS = [300, 600, 900];
+
   // ── Helpers ────────────────────────────────────────────────
   const mix   = (a, b, t) => a + (b - a) * t;
   // Interpolation start point for a segment: fall back to the current position
@@ -82,14 +89,18 @@
   let state = 'title';
   let score = 0, hiScore, lives = 3, level = 1;
   let mushrooms = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
+  // Parallel to `mushrooms`: 1 where the scorpion has poisoned the mushroom in
+  // that cell. Kept separate so mushroom health stays a plain 0-4.
+  let poison = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
   let trains;
   let player;
   let bullets, sparks, floats;
-  let flea, spider;
+  let flea, spider, scorpion;
   let invincible;
   let tickMs, tickTimer, shootCd;
-  let fleaTimer, spiderTimer;
+  let fleaTimer, spiderTimer, scorpTimer;
   let levelClearTimer;
+  let nextExtraLife = EXTRA_LIFE_EVERY;
   let prevTs = 0;
 
   // ── High score storage ─────────────────────────────────────
@@ -117,6 +128,19 @@
 
   hiScore = loadHiScore();
 
+  // Every point goes through here so the bonus cannon is awarded exactly once
+  // per threshold, however the points were earned.
+  function addScore(points) {
+    score += points;
+    while (score >= nextExtraLife) {
+      nextExtraLife += EXTRA_LIFE_EVERY;
+      lives++;
+      addFloat(300, 300, 'EXTRA CANNON', '#0f0');
+    }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    updateHUD();
+  }
+
   // ── Input ──────────────────────────────────────────────────
   const K = {};
   window.addEventListener('keydown', e => {
@@ -137,7 +161,9 @@
   // ── Game setup ─────────────────────────────────────────────
   function startGame() {
     score = 0; lives = 3; level = 1; tickMs = BASE_MS;
+    nextExtraLife = EXTRA_LIFE_EVERY;
     mushrooms = buildMushrooms();
+    poison = blankPoison();
     newRound();
     state = 'playing';
   }
@@ -153,20 +179,26 @@
     trains  = [buildTrain(12, 1)];
     player  = { x: 15 * CELL, y: (ROWS - 2) * CELL + CELL / 2 };
     bullets = []; sparks = []; floats = [];
-    flea = null; spider = null;
+    flea = null; spider = null; scorpion = null;
     tickTimer = 0; shootCd = 0;
     invincible   = 2.0;   // 2s of invincibility after spawn
     fleaTimer    = 15 + rnd() * 10;
     spiderTimer  = 12 + rnd() * 10;
+    scorpTimer   = 16 + rnd() * 12;
     levelClearTimer = 0;
   }
 
   function advanceLevel() {
     level++;
-    score += 1000;
+    addScore(1000);
     tickMs    = Math.max(38, BASE_MS - (level - 1) * 7);
     mushrooms = buildMushrooms();
+    poison    = blankPoison();
     newRound();
+  }
+
+  function blankPoison() {
+    return Array.from({ length: ROWS }, () => new Uint8Array(COLS));
   }
 
   function buildMushrooms() {
@@ -179,8 +211,20 @@
 
   function buildTrain(len, dir) {
     const segs = Array.from({ length: len }, (_, i) => ({ col: i, row: 0 }));
-    return { segs, dir, prev: segs.map(s => ({ ...s })) };
+    return { segs, dir, prev: segs.map(s => ({ ...s })), diving: false };
   }
+
+  // The interpolated screen position of segment `i` of a train, which is what
+  // the renderer and every collision test must agree on.
+  function segPos(train, i, lerpT) {
+    const s = train.segs[i], p = lerpFrom(train.prev[i], s);
+    return {
+      x: mix(p.col, s.col, lerpT) * CELL + CELL / 2,
+      y: mix(p.row, s.row, lerpT) * CELL + CELL / 2,
+    };
+  }
+
+  const stepLerp = () => clamp(tickTimer / (tickMs || 1), 0, 1);
 
   // ── Update ─────────────────────────────────────────────────
   const PSPD     = 260;
@@ -191,7 +235,21 @@
   const SPD_AMP  = 55;    // spider vertical oscillation amplitude px
   const SPD_FREQ = 1.8;   // Hz
 
+  // Bullet-against-segment is a radius test on a 680px/s projectile, so the
+  // frame is advanced in fixed slices rather than one jump at the dt ceiling.
+  const MAX_STEP = 0.008;
+
   function update(dt) {
+    const steps = Math.max(1, Math.ceil(dt / MAX_STEP));
+    const sdt = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      stepWorld(sdt);
+      if (state !== 'playing') return;
+    }
+    updateHUD();
+  }
+
+  function stepWorld(dt) {
     if (invincible > 0) invincible -= dt;
     shootCd = Math.max(0, shootCd - dt);
 
@@ -203,8 +261,9 @@
     player.x = clamp(player.x, CELL / 2,       COLS * CELL - CELL / 2);
     player.y = clamp(player.y, PZONE * CELL + CELL / 2, ROWS * CELL - CELL / 2);
 
-    // Shoot
-    if (K.Space && shootCd === 0) {
+    // Shoot — one shot in the air at a time, as on the cabinet. The round is
+    // correspondingly quick, so tapping fire still gives a fast cadence.
+    if (K.Space && shootCd === 0 && bullets.length === 0) {
       bullets.push({ x: player.x, y: player.y - CELL });
       shootCd = SHOOT_CD;
     }
@@ -217,7 +276,11 @@
     bullets = bullets.filter(b => {
       const c = Math.floor(b.x / CELL), r = Math.floor(b.y / CELL);
       if (r >= 0 && r < ROWS && c >= 0 && c < COLS && mushrooms[r][c] > 0) {
-        if (--mushrooms[r][c] === 0) { score += 5; addFloat(b.x, r * CELL + CELL / 2, '+5', '#3c8'); }
+        if (--mushrooms[r][c] === 0) {
+          poison[r][c] = 0;   // the poison goes with the mushroom
+          addScore(PTS.mushroom);
+          addFloat(b.x, r * CELL + CELL / 2, '+' + PTS.mushroom, '#3c8');
+        }
         addSparks(c * CELL + CELL / 2, r * CELL + CELL / 2, 3, '#2a8');
         return false;
       }
@@ -225,29 +288,38 @@
     });
 
     // Bullet vs centipede
+    // The renderer and the player-collision test both use the interpolated
+    // position of a segment; this used to match on the discrete grid cell
+    // instead, so mid-step you could shoot exactly what you saw and miss.
     outer:
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
       const b = bullets[bi];
-      const bc = Math.floor(b.x / CELL), br = Math.floor(b.y / CELL);
+      const lerpT = stepLerp();
       for (let ti = 0; ti < trains.length; ti++) {
         const train = trains[ti];
-        const si = train.segs.findIndex(s => s.col === bc && s.row === br);
+        let si = -1;
+        for (let i = 0; i < train.segs.length; i++) {
+          const q = segPos(train, i, lerpT);
+          if (Math.hypot(b.x - q.x, b.y - q.y) < CELL * 0.55) { si = i; break; }
+        }
         if (si === -1) continue;
 
-        const pts = si === 0 ? 100 : 10;
-        score += pts;
-        addFloat(b.x, br * CELL + CELL / 2, `+${pts}`, si === 0 ? '#fd4' : '#fc9');
+        const pts = si === 0 ? PTS.head : PTS.body;
         const hit = train.segs[si];
-        if (hit.row < ROWS) mushrooms[hit.row][hit.col] = 4;
+        addFloat(b.x, hit.row * CELL + CELL / 2, `+${pts}`, si === 0 ? '#fd4' : '#fc9');
+        if (hit.row >= 0 && hit.row < ROWS) mushrooms[hit.row][hit.col] = 4;
         addSparks(hit.col * CELL + CELL / 2, hit.row * CELL + CELL / 2, 8, '#f80');
 
         const front = train.segs.slice(0, si);
         const back  = train.segs.slice(si + 1);
+        const pf = train.prev.slice(0, si);
+        const pb = train.prev.slice(si + 1);
         trains.splice(ti, 1);
-        if (front.length) trains.push({ segs: front, dir:  train.dir, prev: front.map(s => ({ ...s })) });
-        if (back.length)  trains.push({ segs: back,  dir: -train.dir, prev: back.map(s => ({ ...s })) });
+        if (front.length) trains.push({ segs: front, dir:  train.dir, prev: pf, diving: train.diving });
+        if (back.length)  trains.push({ segs: back,  dir: -train.dir, prev: pb, diving: train.diving });
 
         bullets.splice(bi, 1);
+        addScore(pts);
         break outer;
       }
     }
@@ -273,40 +345,52 @@
 
     // Centipede vs player (uses interpolated position)
     if (invincible <= 0) {
-      const lerpT = clamp(tickTimer / tickMs, 0, 1);
+      const lerpT = stepLerp();
       for (const train of trains) {
         for (let i = 0; i < train.segs.length; i++) {
-          const s = train.segs[i], p = lerpFrom(train.prev[i], s);
-          const sx = mix(p.col, s.col, lerpT) * CELL + CELL / 2;
-          const sy = mix(p.row, s.row, lerpT) * CELL + CELL / 2;
-          if (Math.hypot(player.x - sx, player.y - sy) < CELL * 0.78) {
+          const q = segPos(train, i, lerpT);
+          if (Math.hypot(player.x - q.x, player.y - q.y) < CELL * 0.78) {
             killPlayer(); return;
           }
         }
       }
     }
 
-    // Flea
     updateFlea(dt);
-
-    // Spider
     updateSpider(dt);
+    updateScorpion(dt);
+  }
 
-    // Sparks & floats
+  // Sparks and floats age in every state, so the burst from the hit that
+  // killed you no longer hangs motionless under the overlay.
+  function updateEffects(dt) {
     sparks.forEach(s => { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
     sparks = sparks.filter(s => s.life > 0);
     floats.forEach(f => { f.y -= 45 * dt; f.life -= dt; });
     floats = floats.filter(f => f.life > 0);
-
-    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
-    updateHUD();
   }
 
   function stepTrain(t) {
     const head = t.segs[0];
+
+    // Poisoned: plunge straight down to the player zone, then weave again.
+    if (t.diving) {
+      for (let i = t.segs.length - 1; i >= 1; i--) t.segs[i] = { ...t.segs[i - 1] };
+      const nr = head.row + 1;
+      if (nr >= ROWS) {
+        t.segs[0] = { col: head.col, row: 0 };
+        t.diving = false;
+      } else {
+        t.segs[0] = { col: head.col, row: nr };
+        if (nr >= ROWS - 1) t.diving = false;
+      }
+      return;
+    }
+
     const nc   = head.col + t.dir;
     const wall = nc < 0 || nc >= COLS;
     const mush = !wall && mushrooms[head.row][nc] > 0;
+    const venom = mush && poison[head.row][nc] > 0;
 
     for (let i = t.segs.length - 1; i >= 1; i--) t.segs[i] = { ...t.segs[i - 1] };
 
@@ -314,8 +398,52 @@
       const nr = head.row + 1;
       t.segs[0] = { col: head.col, row: nr >= ROWS ? 0 : nr };
       t.dir *= -1;
+      // Bumping a poisoned mushroom is what triggers the dive in the arcade.
+      if (venom) t.diving = true;
     } else {
       t.segs[0] = { col: nc, row: head.row };
+    }
+  }
+
+  // ── Scorpion ───────────────────────────────────────────────
+  // Crosses the mushroom field poisoning everything it walks over, and never
+  // enters the player zone. Worth 1,000.
+  const SCORP_SPD = 155;
+
+  function updateScorpion(dt) {
+    if (!scorpion) {
+      scorpTimer -= dt;
+      // It only turns up once there is a field worth poisoning.
+      if (scorpTimer <= 0 && level >= 2) {
+        const fromLeft = rnd() < 0.5;
+        const row = 2 + rndInt(Math.max(1, PZONE - 5));
+        scorpion = {
+          x:   fromLeft ? -CELL : COLS * CELL + CELL,
+          row,
+          y:   row * CELL + CELL / 2,
+          vx:  fromLeft ? SCORP_SPD : -SCORP_SPD,
+        };
+        scorpTimer = 20 + rnd() * 14;
+      }
+      return;
+    }
+
+    scorpion.x += scorpion.vx * dt;
+
+    const c = Math.floor(scorpion.x / CELL);
+    if (c >= 0 && c < COLS && mushrooms[scorpion.row][c] > 0) poison[scorpion.row][c] = 1;
+
+    if (scorpion.x < -CELL * 2 || scorpion.x > COLS * CELL + CELL * 2) { scorpion = null; return; }
+
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      const b = bullets[bi];
+      if (Math.hypot(b.x - scorpion.x, b.y - scorpion.y) < CELL) {
+        addFloat(scorpion.x, scorpion.y, '+' + PTS.scorpion, '#b6f');
+        addSparks(scorpion.x, scorpion.y, 14, '#b6f');
+        scorpion = null; bullets.splice(bi, 1);
+        addScore(PTS.scorpion);
+        return;
+      }
     }
   }
 
@@ -326,7 +454,7 @@
       let mcount = 0;
       for (let r = 0; r < PZONE; r++) for (let c = 0; c < COLS; c++) if (mushrooms[r][c]) mcount++;
       if (fleaTimer <= 0 || mcount < 6) {
-        flea = { col: rndInt(COLS), y: -CELL };
+        flea = { col: rndInt(COLS), y: -CELL, hp: 2, speedMul: 1 };
         flea.x = flea.col * CELL + CELL / 2;
         flea.prevRow = -1;
         fleaTimer = 14 + rnd() * 10;
@@ -334,7 +462,7 @@
       return;
     }
 
-    const speed = FLEA_SPD + level * 15;
+    const speed = (FLEA_SPD + level * 15) * flea.speedMul;
     flea.y += speed * dt;
 
     // Drop mushroom when crossing into a new row (~40% chance per row)
@@ -351,10 +479,18 @@
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
       const b = bullets[bi];
       if (Math.hypot(b.x - flea.x, b.y - flea.y) < CELL) {
-        score += 200;
-        addFloat(flea.x, flea.y, '+200', '#ff0');
+        bullets.splice(bi, 1);
+        // The arcade flea takes two hits: the first only makes it drop faster.
+        if (--flea.hp > 0) {
+          flea.speedMul = 2.1;
+          addSparks(flea.x, flea.y, 6, '#ff0');
+          return;
+        }
+        addFloat(flea.x, flea.y, '+' + PTS.flea, '#ff0');
         addSparks(flea.x, flea.y, 10, '#ff0');
-        flea = null; bullets.splice(bi, 1); return;
+        flea = null;
+        addScore(PTS.flea);
+        return;
       }
     }
 
@@ -396,10 +532,17 @@
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
       const b = bullets[bi];
       if (Math.hypot(b.x - spider.x, b.y - sy) < CELL) {
-        score += 300;
-        addFloat(spider.x, sy, '+300', '#f66');
+        // 300 / 600 / 900 by range, as on the cabinet — shooting one in your
+        // face is worth three times shooting one across the zone.
+        const range = Math.hypot(player.x - spider.x, player.y - sy);
+        const pts = range < CELL * 1.6 ? SPIDER_PTS[2]
+                  : range < CELL * 3.6 ? SPIDER_PTS[1]
+                  : SPIDER_PTS[0];
+        addFloat(spider.x, sy, '+' + pts, '#f66');
         addSparks(spider.x, sy, 12, '#f44');
-        spider = null; bullets.splice(bi, 1); return;
+        spider = null; bullets.splice(bi, 1);
+        addScore(pts);
+        return;
       }
     }
 
@@ -416,6 +559,7 @@
     state = lives > 0 ? 'dead' : 'gameover';
     updateHUD();
   }
+
 
   function addSparks(x, y, n, color) {
     for (let i = 0; i < n; i++) {
@@ -438,6 +582,9 @@
 
   // ── Draw ───────────────────────────────────────────────────
   const MUSH_CLR = [null, '#174017', '#245c24', '#318031', '#3ea43e'];
+  // A poisoned mushroom has to be unmistakable — bumping one sends the
+  // centipede straight down at you.
+  const POISON_CLR = [null, '#3a1030', '#5c1848', '#802060', '#a42878'];
 
   function draw() {
     ctx.fillStyle = '#060a06';
@@ -463,7 +610,7 @@
         const h = mushrooms[r][c];
         if (!h) continue;
         const mx = c * CELL + CELL / 2, my = r * CELL + CELL / 2;
-        ctx.fillStyle = MUSH_CLR[h];
+        ctx.fillStyle = poison[r][c] ? POISON_CLR[h] : MUSH_CLR[h];
         ctx.beginPath(); ctx.arc(mx, my, CELL / 2 - 3, 0, Math.PI * 2); ctx.fill();
         if (h < 4) {
           ctx.strokeStyle = '#060a06'; ctx.lineWidth = 1.5;
@@ -479,14 +626,15 @@
 
     // Centipede
     if (trains) {
-      const lerpT = clamp(tickTimer / (tickMs || 1), 0, 1);
+      const lerpT = stepLerp();
       for (const train of trains) {
         for (let i = train.segs.length - 1; i >= 0; i--) {
-          const s = train.segs[i], p = lerpFrom(train.prev[i], s);
-          const x = mix(p.col, s.col, lerpT) * CELL + CELL / 2;
-          const y = mix(p.row, s.row, lerpT) * CELL + CELL / 2;
+          const q = segPos(train, i, lerpT);
+          const x = q.x, y = q.y;
           const r = CELL / 2 - 2;
-          ctx.fillStyle = i === 0 ? '#d94' : '#b73';
+          // A plunging train glows, so the dive is readable the moment it starts.
+          ctx.fillStyle = train.diving ? (i === 0 ? '#f6c' : '#d49')
+                                       : (i === 0 ? '#d94' : '#b73');
           ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = i === 0 ? '#a63' : '#823';
           ctx.lineWidth = 1.5;
@@ -505,7 +653,7 @@
 
     // Flea
     if (flea) {
-      ctx.fillStyle = '#dd0';
+      ctx.fillStyle = flea.hp > 1 ? '#dd0' : '#f70';
       ctx.beginPath(); ctx.ellipse(flea.x, flea.y, 4, 7, 0, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#aa0'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(flea.x - 2, flea.y - 6); ctx.lineTo(flea.x - 5, flea.y - 11); ctx.stroke();
@@ -527,6 +675,29 @@
       ctx.beginPath(); ctx.arc(spider.x, sy, CELL / 2 - 3, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#f66';
       ctx.beginPath(); ctx.arc(spider.x, sy, CELL / 2 - 6, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Scorpion
+    if (scorpion) {
+      const sx = scorpion.x, sy = scorpion.y;
+      const facing = scorpion.vx > 0 ? 1 : -1;
+      ctx.strokeStyle = '#b6f'; ctx.lineWidth = 1.5;
+      // Legs
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(sx + i * 4, sy - 2); ctx.lineTo(sx + i * 4 - 3, sy - 7);
+        ctx.moveTo(sx + i * 4, sy + 2); ctx.lineTo(sx + i * 4 - 3, sy + 7);
+        ctx.stroke();
+      }
+      // Tail, curling up over the body
+      ctx.beginPath();
+      ctx.moveTo(sx - facing * 7, sy);
+      ctx.quadraticCurveTo(sx - facing * 13, sy - 2, sx - facing * 10, sy - 9);
+      ctx.stroke();
+      ctx.fillStyle = '#c7f';
+      ctx.beginPath(); ctx.ellipse(sx, sy, 8, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e9f';
+      ctx.beginPath(); ctx.arc(sx + facing * 7, sy, 2.6, 0, Math.PI * 2); ctx.fill();
     }
 
     // Bullets
@@ -572,6 +743,7 @@
       big('CENTIPEDE', '#0f0', 200);
       small('PRESS SPACE TO START', '#8a8', 262);
       small('ARROW KEYS / WASD  ·  SPACE TO FIRE  ·  P PAUSE', '#3a5a3a', 300);
+      small('BEWARE THE SCORPION — POISONED MUSHROOMS MAKE IT DIVE', '#5a3a5a', 322);
       if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#555', 338);
     }
     if (state === 'gameover') {
@@ -621,12 +793,10 @@
       update(dt);
     } else if (state === 'levelclear') {
       levelClearTimer -= dt;
-      sparks.forEach(s => { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
-      sparks = sparks.filter(s => s.life > 0);
-      floats.forEach(f => { f.y -= 45 * dt; f.life -= dt; });
-      floats = floats.filter(f => f.life > 0);
       if (levelClearTimer <= 0) { advanceLevel(); state = 'playing'; }
     }
+
+    if (sparks) updateEffects(dt);
 
     draw();
     requestAnimationFrame(frame);
