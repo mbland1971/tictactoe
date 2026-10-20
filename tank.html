@@ -68,7 +68,8 @@
   const COLS = W / TILE; // 15
   const ROWS = H / TILE; // 15
 
-  // '#' = steel (indestructible), 'B' = brick (destructible), '.' = empty
+  // '#' = steel (indestructible), 'B' = brick (destructible),
+  // 'E' = the base (the eagle), '.' = empty
   const MAP = [
     '###############',
     '#.............#',
@@ -82,10 +83,15 @@
     '#.BB.#####.BB.#',
     '#.............#',
     '#.BB...BB..BB.#',
-    '#.BB...BB..BB.#',
-    '#.............#',
+    '#.BB..BBB..BB.#',
+    '#.BB..BEB..BB.#',
     '###############',
   ];
+
+  // The base sits in that brick nest. Lose it and the game is over, however
+  // many lives are left — the whole point of the defence.
+  const BASE = { col: 7, row: 13 };
+  const baseCentre = () => ({ x: BASE.col * TILE + TILE / 2, y: BASE.row * TILE + TILE / 2 });
 
   const TANK_SIZE      = 32;
   const BULLET_SIZE    = 5;
@@ -108,7 +114,9 @@
     { x: 7 * TILE,  y: 1 * TILE },
     { x: 13 * TILE, y: 1 * TILE },
   ];
-  const PLAYER_SPAWN = { x: 7 * TILE + (TILE - TANK_SIZE) / 2, y: 13 * TILE + (TILE - TANK_SIZE) / 2 };
+  const PLAYER_SPAWN = { x: 4 * TILE + (TILE - TANK_SIZE) / 2, y: 13 * TILE + (TILE - TANK_SIZE) / 2 };
+
+  const EXTRA_LIFE_EVERY = 20000;   // bonus tank per 20,000 points
 
   // ── State ──────────────────────────────────────────────
   let state = 'title';
@@ -118,6 +126,8 @@
   let enemies = [], bullets = [], particles = [];
   let enemiesQueue = 0, spawnTimer = 0;
   let levelClearTimer = 0;
+  let baseAlive = true;
+  let nextExtraLife = EXTRA_LIFE_EVERY;
   let time = 0, prevTs = 0;
 
   // ── High score storage ─────────────────────────────────────
@@ -145,6 +155,18 @@
 
   hiScore = loadHiScore();
 
+  // Every point goes through here so the bonus tank is awarded exactly once
+  // per threshold, however the points were earned.
+  function addScore(points) {
+    score += points;
+    while (score >= nextExtraLife) {
+      nextExtraLife += EXTRA_LIFE_EVERY;
+      lives++;
+    }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    updateHUD();
+  }
+
   // ── Input ──────────────────────────────────────────────
   const K = {};
   window.addEventListener('keydown', e => {
@@ -165,6 +187,7 @@
   // ── Setup ──────────────────────────────────────────────
   function startGame() {
     score = 0; lives = 3; level = 1;
+    nextExtraLife = EXTRA_LIFE_EVERY;
     bullets = []; particles = [];
     player = {
       x: PLAYER_SPAWN.x, y: PLAYER_SPAWN.y, w: TANK_SIZE, h: TANK_SIZE,
@@ -178,6 +201,11 @@
   function startLevel() {
     grid = MAP.map(row => row.split(''));
     enemies = [];
+    // Shells were never cleared here, so rounds left over from the previous
+    // wave hung frozen on screen through the interlude and then resumed into
+    // the rebuilt map at a freshly spawned tank.
+    bullets = [];
+    baseAlive = true;
     enemiesQueue = Math.min(4 + (level - 1) * 2, 14);
     spawnTimer = 0.6;
     player.x = PLAYER_SPAWN.x; player.y = PLAYER_SPAWN.y;
@@ -185,6 +213,7 @@
   }
 
   function resumeAfterDeath() {
+    bullets = [];
     player.x = PLAYER_SPAWN.x; player.y = PLAYER_SPAWN.y;
     player.facing = 'up'; player.alive = true; player.invuln = RESPAWN_INVULN;
     state = 'playing';
@@ -199,7 +228,7 @@
       for (let c = left; c <= right; c++) {
         if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return true;
         const ch = grid[r][c];
-        if (ch === '#' || ch === 'B') return true;
+        if (ch === '#' || ch === 'B' || ch === 'E') return true;
       }
     }
     return false;
@@ -226,17 +255,32 @@
     return true;
   }
 
-  function wallBetween(x1, y1, x2, y2) {
+  // Steel always blocks a line of fire. Brick only blocks when `brickBlocks`
+  // is set: an enemy lining up on the player will not waste shots into a wall,
+  // but one lining up on the base fires straight through the brick nest, which
+  // is how it breaks in.
+  function wallBetween(x1, y1, x2, y2, brickBlocks = true) {
     const steps = 20;
     for (let i = 1; i < steps; i++) {
       const t = i / steps;
       const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
       const c = Math.floor(x / TILE), r = Math.floor(y / TILE);
-      if (!grid[r]) continue;
+      if (!grid[r] || c < 0 || c >= COLS) continue;
       const ch = grid[r][c];
-      if (ch === '#' || ch === 'B') return true;
+      if (ch === '#') return true;
+      if (ch === 'B' && brickBlocks) return true;
     }
     return false;
+  }
+
+  // The tile directly ahead of a tank, or null if it is off the map.
+  function tileAhead(tank) {
+    const [dx, dy] = DIR_VEC[tank.facing];
+    const cx = tank.x + tank.w / 2 + dx * (tank.w / 2 + TILE / 2);
+    const cy = tank.y + tank.h / 2 + dy * (tank.h / 2 + TILE / 2);
+    const c = Math.floor(cx / TILE), r = Math.floor(cy / TILE);
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return null;
+    return grid[r][c];
   }
 
   // ── Combat ─────────────────────────────────────────────
@@ -257,6 +301,8 @@
       const ch = grid[r][c];
       if (ch === '#') { b.dead = true; addBurst(cx, cy, 6, '#ccd2da'); continue; }
       if (ch === 'B') { grid[r][c] = '.'; b.dead = true; addBurst(cx, cy, 8, '#c97a45'); continue; }
+      // Either side's shell will do it — keep your own line of fire clear.
+      if (ch === 'E') { b.dead = true; destroyBase(); continue; }
       if (b.isPlayer) {
         for (const en of enemies) {
           if (en.alive && pointInRect(cx, cy, en)) { hitEnemy(en); b.dead = true; break; }
@@ -274,16 +320,30 @@
     addBurst(en.x + en.w / 2, en.y + en.h / 2, 6, en.color);
     if (en.hp <= 0) {
       en.alive = false;
-      score += en.points;
-      if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
       addBurst(en.x + en.w / 2, en.y + en.h / 2, 24, '#ff8844');
-      updateHUD();
+      addScore(en.points);
     }
+  }
+
+  // Losing the base ends the run outright, whatever lives are left.
+  function destroyBase() {
+    if (!baseAlive) return;
+    baseAlive = false;
+    grid[BASE.row][BASE.col] = '.';
+    const c = baseCentre();
+    addBurst(c.x, c.y, 40, '#ffd24a');
+    addBurst(c.x, c.y, 24, '#ff5050');
+    bullets = [];
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    state = 'baselost';
+    levelClearTimer = 2.4;
+    updateHUD();
   }
 
   function killPlayer() {
     addBurst(player.x + player.w / 2, player.y + player.h / 2, 24, '#5fe0ff');
     player.alive = false;
+    bullets = [];   // otherwise they hang mid-air through the death overlay
     lives--;
     updateHUD();
     if (lives > 0) {
@@ -317,13 +377,20 @@
       speed: def.speed, fireRate: def.fireCd, fireCd: def.fireCd * rnd(),
       hp: def.hp, maxHp: def.hp, points: def.points, color: def.color, type,
       thinkCd: 0,
+      // Most of the column drives for the base; the rest hunt the player. A
+      // wave that only ever chased the player left the base unthreatened.
+      goal: rnd() < 0.6 ? 'base' : 'player',
     });
     enemiesQueue--;
   }
 
   function decideMove(en) {
-    const dx = (player.x + player.w / 2) - (en.x + en.w / 2);
-    const dy = (player.y + player.h / 2) - (en.y + en.h / 2);
+    const aimBase = en.goal === 'base' || !player.alive;
+    const goal = aimBase
+      ? baseCentre()
+      : { x: player.x + player.w / 2, y: player.y + player.h / 2 };
+    const dx = goal.x - (en.x + en.w / 2);
+    const dy = goal.y - (en.y + en.h / 2);
     let prefs;
     if (Math.abs(dx) > Math.abs(dy)) {
       prefs = [dx > 0 ? 'right' : 'left', dy > 0 ? 'down' : 'up', dx > 0 ? 'left' : 'right', dy > 0 ? 'up' : 'down'];
@@ -347,19 +414,36 @@
   }
 
   function tryEnemyFire(en) {
-    if (en.fireCd > 0 || !player.alive) return;
+    if (en.fireCd > 0) return;
     const ex = en.x + en.w / 2, ey = en.y + en.h / 2;
-    const px = player.x + player.w / 2, py = player.y + player.h / 2;
     const TOL = TILE * 0.45;
-    let dir = null;
-    if (Math.abs(ex - px) < TOL) dir = py < ey ? 'up' : 'down';
-    else if (Math.abs(ey - py) < TOL) dir = px < ex ? 'left' : 'right';
-    if (!dir) return;
-    if (dir === 'up' || dir === 'down') { if (wallBetween(ex, ey, ex, py)) return; }
-    else { if (wallBetween(ex, ey, px, ey)) return; }
-    en.facing = dir;
-    fireBullet(en, false);
-    en.fireCd = en.fireRate;
+
+    // Candidate targets, in priority order. Brick blocks a shot at the player
+    // (no point feeding a wall) but not a shot at the base, which is exactly
+    // how an enemy chews through the nest.
+    const shots = [];
+    if (player.alive) {
+      shots.push({ x: player.x + player.w / 2, y: player.y + player.h / 2, brickBlocks: true });
+    }
+    if (baseAlive) {
+      const b = baseCentre();
+      shots.push({ x: b.x, y: b.y, brickBlocks: false });
+    }
+
+    for (const t of shots) {
+      let dir = null;
+      if (Math.abs(ex - t.x) < TOL) dir = t.y < ey ? 'up' : 'down';
+      else if (Math.abs(ey - t.y) < TOL) dir = t.x < ex ? 'left' : 'right';
+      if (!dir) continue;
+      const blocked = (dir === 'up' || dir === 'down')
+        ? wallBetween(ex, ey, ex, t.y, t.brickBlocks)
+        : wallBetween(ex, ey, t.x, ey, t.brickBlocks);
+      if (blocked) continue;
+      en.facing = dir;
+      fireBullet(en, false);
+      en.fireCd = en.fireRate;
+      return;
+    }
   }
 
   function updateEnemy(en, dt) {
@@ -371,6 +455,11 @@
     if (!moved) en.thinkCd = 0;
     en.fireCd -= dt;
     tryEnemyFire(en);
+    // Walled in by brick: blast it rather than grinding against it.
+    if (!moved && en.fireCd <= 0 && tileAhead(en) === 'B') {
+      fireBullet(en, false);
+      en.fireCd = en.fireRate;
+    }
   }
 
   // ── Player input ───────────────────────────────────────
@@ -409,7 +498,21 @@
   }
 
   // ── Update ─────────────────────────────────────────────
+  // Shells and tanks are resolved with point and rect tests, so the frame is
+  // advanced in fixed slices rather than one large jump at the dt ceiling.
+  const MAX_STEP = 0.008;
+
   function update(dt) {
+    const steps = Math.max(1, Math.ceil(dt / MAX_STEP));
+    const sdt = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      stepWorld(sdt);
+      if (state !== 'playing') return;
+    }
+    updateHUD();
+  }
+
+  function stepWorld(dt) {
     time += dt;
     player.invuln = Math.max(0, player.invuln - dt);
     handlePlayerInput(dt);
@@ -433,15 +536,12 @@
     }
 
     if (state === 'playing' && enemiesQueue === 0 && enemies.length === 0) {
-      score += 1000;
-      if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+      addScore(1000);
       addBurst(W / 2, H / 2, 50, '#9aff4a');
-      updateHUD();
+      bullets = [];
       state = 'levelclear';
       levelClearTimer = 2.8;
     }
-
-    updateHUD();
   }
 
   function updateHUD() {
@@ -470,6 +570,7 @@
         const ch = grid[r][c];
         if (ch === '#') drawSteel(c * TILE, r * TILE);
         else if (ch === 'B') drawBrick(c * TILE, r * TILE);
+        else if (ch === 'E') drawBase(c * TILE, r * TILE);
       }
     }
 
@@ -497,6 +598,7 @@
       big('TANK BATTLE', '#9aff4a', 225);
       small('PRESS SPACE TO START', '#5a8a30', 284);
       small('ARROW KEYS / WASD  ·  SPACE FIRE  ·  P PAUSE', '#3a5520', 318);
+      small('DEFEND THE EAGLE AT THE BOTTOM OF THE MAP', '#5a8a30', 346);
       if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#2a4218', 356);
     }
     if (state === 'gameover') {
@@ -518,11 +620,47 @@
       big('COMPLETE!', '#ff8', 284);
       small('+1000 BONUS', '#fa4', 332);
     }
+    if (state === 'baselost') {
+      overlay(0.52);
+      big('BASE DESTROYED', '#e33', 240);
+      small('THE RUN ENDS HERE', '#f84', 296);
+    }
     if (state === 'paused') {
       overlay(0.56);
       big('PAUSED', '#ff0', 268);
       small('P  TO RESUME', '#aa0', 322);
     }
+  }
+
+  // The eagle. Drawn wrecked once it has been hit, so the reason the run
+  // ended is visible on the board.
+  function drawBase(x, y) {
+    const cx = x + TILE / 2;
+    ctx.fillStyle = baseAlive ? '#3a4a20' : '#2a2a2a';
+    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+    if (!baseAlive) {
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y + 8);   ctx.lineTo(x + TILE - 8, y + TILE - 8);
+      ctx.moveTo(x + TILE - 8, y + 8); ctx.lineTo(x + 8, y + TILE - 8);
+      ctx.stroke();
+      return;
+    }
+    // Body
+    ctx.fillStyle = '#ffd24a';
+    ctx.beginPath();
+    ctx.moveTo(cx, y + 7);
+    ctx.lineTo(x + TILE - 7, y + 20);
+    ctx.lineTo(cx, y + TILE - 8);
+    ctx.lineTo(x + 7, y + 20);
+    ctx.closePath();
+    ctx.fill();
+    // Head and tail
+    ctx.fillStyle = '#fff2c0';
+    ctx.beginPath(); ctx.arc(cx, y + 13, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#c9942a';
+    ctx.fillRect(cx - 3, y + TILE - 13, 6, 6);
   }
 
   function drawSteel(x, y) {
@@ -604,6 +742,11 @@
         startLevel();
         state = 'playing';
       }
+    } else if (state === 'baselost') {
+      time += dt;
+      levelClearTimer -= dt;
+      updateParticles(dt);
+      if (levelClearTimer <= 0) state = 'gameover';
     } else {
       time += dt;
       updateParticles(dt);
