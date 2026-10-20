@@ -65,7 +65,16 @@
 
   const SHIELD_COUNT = 4;
   const SAUCER_SPD   = 140;
-  const SAUCER_PTS   = [50, 100, 150, 300];
+
+  // The mystery ship's value is not random in the arcade: it follows a fixed
+  // table indexed by the number of shots the player has fired, which is why the
+  // 23rd shot — and every 15th after it — is the one worth 300. The cadence
+  // also puts a 300 on shot 8, but no saucer has appeared that early, which is
+  // why the trick is remembered as "the 23rd shot".
+  const SAUCER_TABLE = [100, 50, 50, 100, 150, 100, 100, 50, 300, 100, 100, 100, 50, 150, 100];
+
+  const MAX_INV_BULLETS = 3;     // the arcade allows three invader shots aloft
+  const EXTRA_LIFE_AT   = 1500;  // bonus cannon, as on the original cabinet
 
   // ── State ──────────────────────────────────────────────────
   let state = 'title';
@@ -80,6 +89,8 @@
   let stepDir, stepDrop;
   let saucerTimer;
   let levelClearTimer;
+  let shotsFired = 0;      // drives the mystery ship's value
+  let extraLifeGiven = false;
   let prevTs = 0;
 
   // ── Randomness ─────────────────────────────────────────
@@ -130,6 +141,18 @@
 
   hiScore = loadHiScore();
 
+  // Every point goes through here so the bonus cannon is awarded exactly once.
+  function addScore(points) {
+    score += points;
+    if (!extraLifeGiven && score >= EXTRA_LIFE_AT) {
+      extraLifeGiven = true;
+      lives++;
+      addFloat(W / 2, H / 2, 'EXTRA CANNON', '#0f8');
+    }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    updateHUD();
+  }
+
   // ── Input ──────────────────────────────────────────────────
   const K = {};
   window.addEventListener('keydown', e => {
@@ -149,6 +172,7 @@
   // ── Setup ──────────────────────────────────────────────────
   function startGame() {
     score = 0; lives = 3; level = 1;
+    shotsFired = 0; extraLifeGiven = false;
     buildLevel();
     state = 'playing';
   }
@@ -161,6 +185,7 @@
     invBullets = [];
     particles  = []; floats = [];
     shootCd    = 0;
+    invShootTimer = INV_SHOOT_BASE;   // no free shot the instant you reappear
     state      = 'playing';
     prevTs     = performance.now();
   }
@@ -171,7 +196,10 @@
       for (let c = 0; c < COLS; c++) {
         invaders.push({
           row: r, col: c,
-          type: r === 0 ? 2 : r < 3 ? 1 : 0,  // 0=squid,1=crab,2=octopus
+          // Top row is the squid (30), the middle two are crabs (20), the
+          // bottom two are octopuses (10) — the sprite must follow the value.
+          // This was inverted, so the 30-point row was drawn as an octopus.
+          type: r === 0 ? 0 : r < 3 ? 1 : 2,  // 0=squid,1=crab,2=octopus
           alive: true,
           frame: 0,
         });
@@ -215,7 +243,7 @@
           pixels[py][px] = (arch || tl || tr) ? 0 : 1;
         }
       }
-      out.push({ x: sx, y: sy, w: sw, h: sh, pixels });
+      out.push({ x: sx, y: sy, w: sw, h: sh, pixels, cv: null, dirty: true });
     }
     return out;
   }
@@ -223,7 +251,22 @@
   function aliveCount() { return invaders.filter(i => i.alive).length; }
 
   // ── Update ─────────────────────────────────────────────────
+  // A 520px/s shot covers 26px in one frame at the dt ceiling, which is more
+  // than the 24px height of an invader — so a single large step could carry a
+  // bullet clean through one. The frame is advanced in fixed slices instead.
+  const MAX_STEP = 0.008;
+
   function update(dt) {
+    const steps = Math.max(1, Math.ceil(dt / MAX_STEP));
+    const sdt = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      stepWorld(sdt);
+      if (state !== 'playing') return;   // died, or cleared the wave
+    }
+    updateHUD();
+  }
+
+  function stepWorld(dt) {
     const p = player;
     if (p.invincible > 0) p.invincible -= dt;
     shootCd = Math.max(0, shootCd - dt);
@@ -237,6 +280,7 @@
     if (K.Space && shootCd === 0 && bullets.length === 0) {
       bullets.push({ x: p.x, y: PLAYER_Y - 16, vy: -BULLET_SPD });
       shootCd = SHOOT_CD;
+      shotsFired++;
     }
 
     // Player bullet
@@ -271,13 +315,11 @@
             b.y > iy - INV_H / 2 && b.y < iy + INV_H / 2) {
           inv.alive = false;
           const pts = ROW_PTS[inv.row];
-          score += pts;
           addFloat(ix, iy, `+${pts}`, '#c8f');
           addParticles(ix, iy, 8, '#c8f');
           bullets.splice(bi, 1);
           recalcSpeed();
-          if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
-          updateHUD();
+          addScore(pts);
           if (aliveCount() === 0) {
             state = 'levelclear'; levelClearTimer = 2.2;
             addParticles(W / 2, H / 2, 30, '#c8f');
@@ -369,6 +411,8 @@
   function invaderShoot(dt) {
     invShootTimer -= dt;
     if (invShootTimer > 0) return;
+    // Three shots in the air at most, as on the cabinet.
+    if (invBullets.length >= MAX_INV_BULLETS) return;
     invShootTimer = Math.max(0.3, INV_SHOOT_BASE - (level - 1) * 0.1) * (0.5 + rnd());
 
     // Pick a random invader in the bottom-most occupied column
@@ -400,8 +444,10 @@
                 for (let ex = -radius; ex <= radius; ex++) {
                   if (ex*ex + ey*ey <= radius*radius) {
                     const cx = px + ex, cy2 = py + ey;
-                    if (cx >= 0 && cx < sh.w && cy2 >= 0 && cy2 < sh.h)
+                    if (cx >= 0 && cx < sh.w && cy2 >= 0 && cy2 < sh.h) {
                       sh.pixels[cy2][cx] = 0;
+                      sh.dirty = true;
+                    }
                   }
                 }
             }
@@ -422,10 +468,16 @@
         if (iy + INV_H / 2 < sh.y || iy - INV_H / 2 > sh.y + sh.h) continue;
         const ix = invaderX(inv);
         if (ix + INV_W / 2 < sh.x || ix - INV_W / 2 > sh.x + sh.w) continue;
-        // Erode top row of shield under invader
-        for (let py = 0; py < 6; py++)
-          for (let px = 0; px < sh.w; px++)
-            if (sh.pixels[py][px]) sh.pixels[py][px] = 0;
+        // Erode only the block the invader actually overlaps. The old loop ran
+        // the full shield width, so one invader clipping a bunker's edge
+        // deleted the whole top of it in a single frame.
+        const lo  = Math.max(0, Math.floor(ix - INV_W / 2 - sh.x));
+        const hi  = Math.min(sh.w - 1, Math.ceil(ix + INV_W / 2 - sh.x));
+        const top = Math.max(0, Math.floor(iy - INV_H / 2 - sh.y));
+        const bot = Math.min(sh.h - 1, Math.ceil(iy + INV_H / 2 - sh.y));
+        for (let py = top; py <= bot; py++)
+          for (let px = lo; px <= hi; px++)
+            if (sh.pixels[py][px]) { sh.pixels[py][px] = 0; sh.dirty = true; }
       }
     }
   }
@@ -446,13 +498,12 @@
     // Player bullet vs saucer
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
       if (Math.hypot(bullets[bi].x - saucer.x, bullets[bi].y - 28) < 20) {
-        const pts = SAUCER_PTS[rndInt(SAUCER_PTS.length)];
-        score += pts;
+        const pts = SAUCER_TABLE[shotsFired % SAUCER_TABLE.length];
         addFloat(saucer.x, 28, `+${pts}`, '#f6a');
         addParticles(saucer.x, 28, 12, '#f6a');
-        if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
-        updateHUD();
-        saucer = null; bullets.splice(bi, 1); return;
+        saucer = null; bullets.splice(bi, 1);
+        addScore(pts);
+        return;
       }
     }
   }
@@ -495,29 +546,33 @@
 
   // ── Draw ───────────────────────────────────────────────────
 
-  // Invader shapes: each type has 2 animation frames, defined as 11x8 pixel grids
-  // 1 = lit pixel, each cell is 3x3 px scaled to INV_W/INV_H
+  // Invader shapes: three types x 2 animation frames, each an 11x8 pixel grid
+  // scaled to INV_W/INV_H. Every row mirrors about the centre column, so the
+  // sprites sit square in their cell rather than half a pixel off to one side.
+  //
+  // Type order matches the point order: squid (30) on top, crab (20) in the
+  // middle rows, octopus (10) at the bottom — the arcade's arrangement.
   const SHAPES = [
-    // Squid (type 0) — 2 frames
+    // Squid (type 0) — 30 points, top row. The smallest of the three.
     [
-      [[0,0,0,1,1,1,1,1,0,0,0],
-       [0,1,1,1,1,1,1,1,1,1,0],
-       [1,1,0,1,1,1,1,1,0,1,1],
-       [1,1,1,1,1,1,1,1,1,1,1],
-       [0,1,1,0,0,0,0,0,1,1,0],
-       [0,0,1,1,0,0,0,1,1,0,0],
-       [0,1,0,1,0,0,0,1,0,1,0],
-       [0,0,1,0,0,0,0,0,1,0,0]],
-      [[0,0,0,1,1,1,1,1,0,0,0],
-       [0,1,1,1,1,1,1,1,1,1,0],
-       [1,1,0,1,1,1,1,1,0,1,1],
-       [1,1,1,1,1,1,1,1,1,1,1],
+      [[0,0,0,0,1,1,1,0,0,0,0],
+       [0,0,0,1,1,1,1,1,0,0,0],
+       [0,0,1,1,1,1,1,1,1,0,0],
+       [0,0,1,1,0,1,0,1,1,0,0],
+       [0,0,1,1,1,1,1,1,1,0,0],
+       [0,0,0,1,0,1,0,1,0,0,0],
        [0,0,1,0,0,0,0,0,1,0,0],
-       [0,1,1,1,0,0,0,1,1,1,0],
-       [1,1,0,0,0,0,0,0,0,1,1],
-       [0,0,0,0,0,0,0,0,0,0,0]],
+       [0,1,0,0,0,0,0,0,0,1,0]],
+      [[0,0,0,0,1,1,1,0,0,0,0],
+       [0,0,0,1,1,1,1,1,0,0,0],
+       [0,0,1,1,1,1,1,1,1,0,0],
+       [0,0,1,1,0,1,0,1,1,0,0],
+       [0,0,1,1,1,1,1,1,1,0,0],
+       [0,0,1,0,1,0,1,0,1,0,0],
+       [0,1,0,0,0,0,0,0,0,1,0],
+       [0,0,1,0,0,0,0,0,1,0,0]],
     ],
-    // Crab (type 1) — 2 frames
+    // Crab (type 1) — 20 points, middle two rows
     [
       [[0,0,1,0,0,0,0,0,1,0,0],
        [1,0,0,1,0,0,0,1,0,0,1],
@@ -536,26 +591,47 @@
        [1,0,1,0,0,0,0,0,1,0,1],
        [0,1,0,0,0,0,0,0,0,1,0]],
     ],
-    // Octopus (type 2) — 2 frames
+    // Octopus (type 2) — 10 points, bottom two rows. The broadest.
     [
-      [[0,0,0,0,1,1,1,1,0,0,0,0].slice(1),
-       [0,1,1,1,1,1,1,1,1,1,0,0].slice(1),
-       [1,1,0,1,1,1,1,1,0,1,1,0].slice(1),
-       [1,1,1,1,1,1,1,1,1,1,1,0].slice(1),
-       [0,1,1,0,0,0,0,0,1,1,0,0].slice(1),
-       [0,0,1,1,0,1,1,0,1,1,0,0].slice(1),
-       [0,1,0,0,1,0,0,1,0,0,1,0].slice(1),
-       [0,0,1,0,0,0,0,0,0,1,0,0].slice(1)],
-      [[0,0,0,1,1,1,1,0,0,0,0,0].slice(1),
-       [1,1,1,1,1,1,1,1,1,1,0,0].slice(1),
-       [1,0,1,1,1,1,1,1,1,0,1,0].slice(1),
-       [1,1,1,1,1,1,1,1,1,1,1,0].slice(1),
-       [0,1,1,0,0,0,0,0,1,1,0,0].slice(1),
-       [0,1,0,1,0,1,1,0,1,0,1,0].slice(1),
-       [0,0,0,1,0,0,0,1,0,0,0,0].slice(1),
-       [0,0,1,0,0,0,0,0,1,0,0,0].slice(1)],
+      [[0,0,0,1,1,1,1,1,0,0,0],
+       [0,1,1,1,1,1,1,1,1,1,0],
+       [1,1,0,1,1,1,1,1,0,1,1],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [0,1,1,0,0,0,0,0,1,1,0],
+       [0,0,1,1,0,0,0,1,1,0,0],
+       [0,1,0,1,0,0,0,1,0,1,0],
+       [0,0,1,0,0,0,0,0,1,0,0]],
+      [[0,0,0,1,1,1,1,1,0,0,0],
+       [0,1,1,1,1,1,1,1,1,1,0],
+       [1,1,0,1,1,1,1,1,0,1,1],
+       [1,1,1,1,1,1,1,1,1,1,1],
+       [0,0,1,0,0,0,0,0,1,0,0],
+       [0,1,1,1,0,0,0,1,1,1,0],
+       [1,1,0,0,0,0,0,0,0,1,1],
+       [0,0,0,0,0,0,0,0,0,0,0]],
     ],
   ];
+
+  // Each bunker is a 52x34 pixel grid. Rasterise it once into its own canvas
+  // and re-rasterise only when a hit has marked it dirty.
+  function shieldCanvas(sh) {
+    if (!sh.cv) {
+      sh.cv = document.createElement('canvas');
+      sh.cv.width = sh.w;
+      sh.cv.height = sh.h;
+      sh.dirty = true;
+    }
+    if (sh.dirty) {
+      const c = sh.cv.getContext('2d');
+      c.clearRect(0, 0, sh.w, sh.h);
+      c.fillStyle = '#0f8';
+      for (let py = 0; py < sh.h; py++)
+        for (let px = 0; px < sh.w; px++)
+          if (sh.pixels[py][px]) c.fillRect(px, py, 1, 1);
+      sh.dirty = false;
+    }
+    return sh.cv;
+  }
 
   function drawInvader(type, frame, cx, cy) {
     const grid = SHAPES[type][frame];
@@ -586,14 +662,10 @@
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, H - 28); ctx.lineTo(W, H - 28); ctx.stroke();
 
-    // Shields
-    for (const sh of (shields || [])) {
-      ctx.fillStyle = '#0f8';
-      for (let py = 0; py < sh.h; py++)
-        for (let px = 0; px < sh.w; px++)
-          if (sh.pixels[py][px])
-            ctx.fillRect(sh.x + px, sh.y + py, 1, 1);
-    }
+    // Shields — blitted from a per-bunker cache. Painting all four a pixel at
+    // a time cost over 7,000 fillRect calls every frame; now a bunker is only
+    // repainted on the frames it actually takes damage.
+    for (const sh of (shields || [])) ctx.drawImage(shieldCanvas(sh), sh.x, sh.y);
 
     // Invaders
     for (const inv of (invaders || [])) {
@@ -717,7 +789,7 @@
       floats = floats.filter(f => f.life > 0);
       if (levelClearTimer <= 0) {
         level++;
-        score += 1000;
+        addScore(1000);
         buildLevel();
         state = 'playing';
       }
