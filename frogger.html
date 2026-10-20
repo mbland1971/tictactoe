@@ -79,19 +79,33 @@
   const GOAL_CX = [70, 185, 300, 415, 530];
   const GOAL_R  = 22; // claim radius
 
-  // Lane definitions — dir: 1=right, -1=left; objW in cells
+  // Lane definitions — dir: 1=right, -1=left; objW in cells.
+  // `gaps` offsets each object as a fraction of the even spacing, so traffic
+  // and logs arrive irregularly instead of in a perfect metronome.
+  // Turtle rows dive: a turtle group submerges on a cycle and will not carry
+  // the frog while it is under.
   const LANE_DEFS = [
-    { row:1,  type:'log',   dir: 1, speed: 58,  objW:3, count:3, color:'#6b3a10' },
-    { row:2,  type:'log',   dir:-1, speed: 78,  objW:2, count:4, color:'#5a3010' },
-    { row:3,  type:'log',   dir: 1, speed: 52,  objW:3, count:3, color:'#7a4520' },
-    { row:4,  type:'log',   dir:-1, speed: 72,  objW:2, count:3, color:'#5a3010' },
-    { row:5,  type:'log',   dir: 1, speed: 95,  objW:2, count:4, color:'#6b3a10' },
-    { row:7,  type:'car',   dir:-1, speed:120,  objW:1, count:3, color:'#c02020' },
-    { row:8,  type:'truck', dir: 1, speed: 88,  objW:2, count:2, color:'#705890' },
-    { row:9,  type:'car',   dir:-1, speed:162,  objW:1, count:4, color:'#c84020' },
-    { row:10, type:'car',   dir: 1, speed:108,  objW:1, count:3, color:'#1e55b0' },
-    { row:11, type:'truck', dir:-1, speed: 78,  objW:2, count:2, color:'#506070' },
+    { row:1,  type:'log',    dir: 1, speed: 58,  objW:3, count:3, color:'#6b3a10', gaps:[0, 0.18, -0.12] },
+    { row:2,  type:'turtle', dir:-1, speed: 78,  objW:2, count:4, color:'#1f7a52', gaps:[0, -0.1, 0.14, 0.04] },
+    { row:3,  type:'log',    dir: 1, speed: 52,  objW:3, count:3, color:'#7a4520', gaps:[0, 0.22, 0.06] },
+    { row:4,  type:'turtle', dir:-1, speed: 72,  objW:2, count:3, color:'#2a8f60', gaps:[0, 0.16, -0.14] },
+    { row:5,  type:'log',    dir: 1, speed: 95,  objW:2, count:4, color:'#6b3a10', gaps:[0, -0.14, 0.1, 0.2] },
+    { row:7,  type:'car',    dir:-1, speed:120,  objW:1, count:3, color:'#c02020', gaps:[0, 0.2, -0.16] },
+    { row:8,  type:'truck',  dir: 1, speed: 88,  objW:2, count:2, color:'#705890', gaps:[0, 0.12] },
+    { row:9,  type:'car',    dir:-1, speed:162,  objW:1, count:4, color:'#c84020', gaps:[0, -0.12, 0.18, 0.05] },
+    { row:10, type:'car',    dir: 1, speed:108,  objW:1, count:3, color:'#1e55b0', gaps:[0, 0.24, -0.1] },
+    { row:11, type:'truck',  dir:-1, speed: 78,  objW:2, count:2, color:'#506070', gaps:[0, -0.18] },
   ];
+
+  // Turtle dive cycle, in seconds: up, warning (bobbing), under.
+  const DIVE_UP = 4.2, DIVE_WARN = 1.3, DIVE_UNDER = 2.1;
+  const DIVE_CYCLE = DIVE_UP + DIVE_WARN + DIVE_UNDER;
+
+  const EXTRA_LIFE_EVERY = 10000;   // bonus frog per 10,000 points
+
+  // One lily pad at a time hides a crocodile; its open jaws are fatal, the rest
+  // of it is a safe perch. A fly lands on an empty pad for a 200-point snack.
+  const CROC_PTS = 0, FLY_PTS = 200, LADY_PTS = 200;
 
   // ── State ──────────────────────────────────────────────
   let state = 'title';
@@ -101,6 +115,11 @@
   let hopCd = 0;
   let levelClearTimer = 0;
   let time = 0;
+  let nextExtraLife = EXTRA_LIFE_EVERY;
+  let croc = null;      // { goal, timer } — which pad is a crocodile
+  let fly  = null;      // { goal, timer } — which pad has a fly on it
+  let snake = null;     // { x, vx, row } — patrols the median
+  let lady = null;      // { x, row, dir, riding } — the lady frog to escort home
   let prevTs = 0;
 
   // ── High score storage ─────────────────────────────────────
@@ -127,6 +146,19 @@
   }
 
   hiScore = loadHiScore();
+
+  // Every point goes through here so the bonus frog is awarded exactly once
+  // per threshold, however the points were earned.
+  function addScore(points) {
+    score += points;
+    while (score >= nextExtraLife) {
+      nextExtraLife += EXTRA_LIFE_EVERY;
+      lives++;
+      addBurst(W / 2, 7 * CELL, 24, '#ff8');
+    }
+    if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+    updateHUD();
+  }
 
   // ── Input ──────────────────────────────────────────────
   const K = {};
@@ -176,20 +208,30 @@
     // Arcade rule: 10 points for advancing to a row never reached this life.
     if (newRow < frog.bestRow) {
       frog.bestRow = newRow;
-      score += 10;
-      updateHUD();
+      addScore(10);
     }
   }
 
   // ── Setup ──────────────────────────────────────────────
   function startGame() {
     score = 0; lives = 3; level = 1;
+    nextExtraLife = EXTRA_LIFE_EVERY;
     goals = new Set();
     timer = TIME_LIMIT;
     initLanes();
+    resetHazards();
     resetFrog();
     state = 'playing';
     prevTs = performance.now();
+  }
+
+  function resetHazards() {
+    croc = null; fly = null; lady = null;
+    // The snake only patrols the median from level 2.
+    snake = level >= 2
+      ? { x: -CELL, row: 6, vx: (46 + level * 9) * (rnd() < 0.5 ? 1 : -1) }
+      : null;
+    if (snake && snake.vx < 0) snake.x = W + CELL;
   }
 
   function resumeAfterDeath() {
@@ -206,11 +248,30 @@
       const trackW = W + def.objW * CELL;
       const spacing = trackW / def.count;
       const objects = Array.from({ length: def.count }, (_, i) => ({
-        x: i * spacing - def.objW * CELL,
+        // Nudge each object off the even grid so the lane does not read as a
+        // metronome. The offset stays well inside one spacing, so objects
+        // cannot cross over one another.
+        x: (i + (def.gaps ? def.gaps[i % def.gaps.length] : 0)) * spacing - def.objW * CELL,
         w: def.objW * CELL,
+        // Turtle groups share a lane but dive on their own schedule.
+        divePhase: def.type === 'turtle' ? rnd() * DIVE_CYCLE : 0,
       }));
       return { ...def, speed, objects };
     });
+  }
+
+  // Where a turtle group is in its dive: 'up', 'warn' (bobbing, still solid)
+  // or 'under' (will not carry the frog).
+  function divePhaseOf(obj) {
+    const t = (obj.divePhase + time) % DIVE_CYCLE;
+    if (t < DIVE_UP) return 'up';
+    if (t < DIVE_UP + DIVE_WARN) return 'warn';
+    return 'under';
+  }
+
+  // Can the frog ride this thing right now?
+  function isSolid(lane, obj) {
+    return lane.type !== 'turtle' || divePhaseOf(obj) !== 'under';
   }
 
   function resetFrog() {
@@ -261,7 +322,8 @@
     if (RIVER_ROWS.has(frog.row)) {
       const lane = lanes.find(l => l.row === frog.row);
       const fcx  = frog.pixelX + CELL / 2;
-      const log  = lane.objects.find(o => fcx > o.x && fcx < o.x + o.w);
+      // A submerged turtle group is not a perch — the frog goes under with it.
+      const log  = lane.objects.find(o => fcx > o.x && fcx < o.x + o.w && isSolid(lane, o));
       if (!log) { killFrog(); return; }
       frog.pixelX += lane.dir * lane.speed * dt;
       frog.toX = frog.pixelX;
@@ -282,14 +344,26 @@
       const fcx = frog.pixelX + CELL / 2;
       const gi  = GOAL_CX.findIndex(cx => Math.abs(fcx - cx) < GOAL_R);
       if (gi !== -1 && !goals.has(gi)) {
+        // A crocodile lurking in the pad: its open jaws are not a landing spot.
+        if (croc && croc.goal === gi) { killFrog(); return; }
+
         goals.add(gi);
-        score += 50 + Math.floor(timer * 10);
-        if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
+        let pts = 50 + Math.floor(timer * 10);
+        if (fly && fly.goal === gi) {
+          pts += FLY_PTS;
+          addBurst(GOAL_CX[gi], CELL / 2, 14, '#ff4');
+          fly = null;
+        }
+        // Arriving with the lady frog in tow doubles the pad.
+        if (lady && lady.riding) {
+          pts += LADY_PTS;
+          addBurst(GOAL_CX[gi], CELL / 2, 16, '#f9c');
+          lady = null;
+        }
         addBurst(GOAL_CX[gi], CELL / 2, 18, '#3e8');
-        updateHUD();
+        addScore(pts);
         if (goals.size === GOAL_CX.length) {
-          score += 1000;
-          updateHUD();
+          addScore(1000);
           addBurst(W / 2, H / 2, 50, '#ff8');
           state = 'levelclear';
           levelClearTimer = 2.8;
@@ -303,15 +377,80 @@
       return;
     }
 
-    // Particles
-    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
-    particles = particles.filter(p => p.life > 0);
+    updateHazards(dt);
 
     updateHUD();
   }
 
+  // Crocodile, fly, snake and lady frog.
+  function updateHazards(dt) {
+    const freePads = () => GOAL_CX.map((_, i) => i).filter(i => !goals.has(i));
+
+    // The crocodile moves between unclaimed pads so the safe route keeps
+    // changing; it never occupies one the player has already filled.
+    if (level >= 2) {
+      if (!croc) {
+        croc = { goal: -1, timer: 2.5 + rnd() * 3 };
+      }
+      croc.timer -= dt;
+      if (croc.timer <= 0) {
+        const free = freePads();
+        croc.goal = free.length && rnd() < 0.7 ? free[Math.floor(rnd() * free.length)] : -1;
+        croc.timer = 3 + rnd() * 3.5;
+      }
+      if (croc.goal >= 0 && goals.has(croc.goal)) croc.goal = -1;
+    } else {
+      croc = null;
+    }
+
+    // A fly lands on a free pad for a while. Never the same pad as the croc.
+    if (!fly) {
+      if (rnd() < dt * 0.22) {
+        const free = freePads().filter(i => !croc || i !== croc.goal);
+        if (free.length) fly = { goal: free[Math.floor(rnd() * free.length)], timer: 4 + rnd() * 3 };
+      }
+    } else {
+      fly.timer -= dt;
+      if (fly.timer <= 0 || goals.has(fly.goal) || (croc && croc.goal === fly.goal)) fly = null;
+    }
+
+    // The snake patrols the median, which was previously a free rest stop.
+    if (snake) {
+      snake.x += snake.vx * dt;
+      if (snake.x < -CELL * 2) { snake.x = W + CELL; }
+      if (snake.x > W + CELL * 2) { snake.x = -CELL; }
+      if (frog.row === snake.row) {
+        const fl = frog.pixelX + 8, fr = frog.pixelX + CELL - 8;
+        if (fr > snake.x + 4 && fl < snake.x + CELL - 4) { killFrog(); return; }
+      }
+    }
+
+    // The lady frog rides a log in from the side; touch her to pick her up.
+    if (!lady) {
+      if (level >= 2 && rnd() < dt * 0.1) {
+        const row = 1 + Math.floor(rnd() * 5);
+        const lane = lanes.find(l => l.row === row);
+        lady = { row, x: lane.dir === 1 ? -CELL : W, riding: false };
+      }
+    } else if (!lady.riding) {
+      const lane = lanes.find(l => l.row === lady.row);
+      lady.x += lane.dir * lane.speed * dt;
+      if (lady.x < -CELL * 2 || lady.x > W + CELL * 2) {
+        lady = null;
+      } else if (frog.row === lady.row && Math.abs(frog.pixelX - lady.x) < CELL * 0.7) {
+        lady.riding = true;
+        addBurst(lady.x + CELL / 2, lady.row * CELL + CELL / 2, 10, '#f9c');
+      }
+    }
+
+    // Particles
+    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    particles = particles.filter(p => p.life > 0);
+  }
+
   function killFrog() {
     addBurst(frog.drawX + CELL / 2, frog.drawY + CELL / 2, 20, '#3e8');
+    lady = null;   // she does not survive the trip either
     lives--;
     if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
     state = lives > 0 ? 'dead' : 'gameover';
@@ -382,6 +521,31 @@
         ctx.fillStyle = '#fff';
         ctx.beginPath(); ctx.arc(cx - 3, cy - 8, 1.8, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.arc(cx + 3, cy - 8, 1.8, 0, Math.PI * 2); ctx.fill();
+      } else if (croc && croc.goal === i) {
+        // Crocodile: snout and open jaws. Unmistakably not a landing spot.
+        ctx.fillStyle = '#1d6b3a';
+        ctx.beginPath(); ctx.ellipse(cx - 2, cy + 1, 13, 7, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#123';
+        ctx.beginPath();
+        ctx.moveTo(cx + 4, cy - 1);
+        ctx.lineTo(cx + 18, cy - 7);
+        ctx.lineTo(cx + 18, cy + 5);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          ctx.beginPath();
+          ctx.moveTo(cx + 7 + k * 4, cy - 3.5); ctx.lineTo(cx + 8 + k * 4, cy - 1);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#ffdd44';
+        ctx.beginPath(); ctx.arc(cx - 4, cy - 4, 2, 0, Math.PI * 2); ctx.fill();
+      } else if (fly && fly.goal === i) {
+        // Fly: a 200-point snack.
+        ctx.fillStyle = '#221';
+        ctx.beginPath(); ctx.ellipse(cx, cy, 4, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(220,235,255,0.75)';
+        ctx.beginPath(); ctx.ellipse(cx - 2, cy - 3, 4, 2, -0.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx + 2, cy - 3, 4, 2, 0.5, 0, Math.PI * 2); ctx.fill();
       }
     }
 
@@ -394,6 +558,36 @@
         ctx.beginPath(); ctx.moveTo(rx, wy); ctx.lineTo(rx + 18, wy); ctx.stroke();
         const wy2 = ry + 34 + Math.sin(rx * 0.1 + time * 1.4 + 1) * 3;
         ctx.beginPath(); ctx.moveTo(rx + 8, wy2); ctx.lineTo(rx + 24, wy2); ctx.stroke();
+      }
+    }
+
+    // Turtles — three to a group, bobbing as they prepare to dive and gone
+    // from the surface while they are under.
+    for (const lane of lanes) {
+      if (lane.type !== 'turtle') continue;
+      for (const obj of lane.objects) {
+        const phase = divePhaseOf(obj);
+        if (phase === 'under') continue;
+        const ly = lane.row * CELL;
+        const bob = phase === 'warn' ? Math.sin(time * 16) * 1.6 : 0;
+        const alpha = phase === 'warn' ? 0.72 : 1;
+        const n = Math.max(2, Math.round(obj.w / CELL) + 1);
+        ctx.globalAlpha = alpha;
+        for (let k = 0; k < n; k++) {
+          const tx = obj.x + 6 + k * ((obj.w - 12) / Math.max(1, n - 1));
+          const ty = ly + CELL / 2 + bob;
+          ctx.fillStyle = lane.color;
+          ctx.beginPath(); ctx.ellipse(tx, ty, 11, 9, 0, 0, Math.PI * 2); ctx.fill();
+          // shell plates
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(tx, ty, 6, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(tx - 9, ty); ctx.lineTo(tx + 9, ty); ctx.stroke();
+          // head, pointing the way it swims
+          ctx.fillStyle = '#9ad8b0';
+          ctx.beginPath();
+          ctx.arc(tx + lane.dir * 12, ty, 3.2, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
       }
     }
 
@@ -440,8 +634,38 @@
       }
     }
 
+    // Snake on the median
+    if (snake) {
+      const sy = snake.row * CELL + CELL / 2;
+      ctx.strokeStyle = '#d4c020';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let k = 0; k <= 10; k++) {
+        const px = snake.x + k * 4.4;
+        const py = sy + Math.sin(k * 0.9 + time * 7) * 5;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      const headX = snake.x + (snake.vx > 0 ? 44 : 0);
+      ctx.fillStyle = '#f0d830';
+      ctx.beginPath(); ctx.arc(headX, sy + Math.sin((snake.vx > 0 ? 10 : 0) * 0.9 + time * 7) * 5, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Lady frog waiting on her log
+    if (lady && !lady.riding) {
+      drawFrog(lady.x, lady.row * CELL, 'up', '#f49ac0', '#d97aa6');
+    }
+
     // Frog
     if (frog) drawFrog(frog.drawX, frog.drawY, frog.facing);
+    // ...with the lady frog on his back once she has been collected
+    if (frog && lady && lady.riding) {
+      ctx.globalAlpha = 0.95;
+      drawFrog(frog.drawX, frog.drawY - 7, frog.facing, '#f49ac0', '#d97aa6');
+      ctx.globalAlpha = 1;
+    }
 
     // Particles
     for (const p of particles) {
@@ -464,6 +688,8 @@
       big('FROGGER', '#3e8', 225);
       small('PRESS SPACE TO START', '#2a6a3a', 284);
       small('ARROW KEYS / WASD  ·  P PAUSE', '#163a22', 318);
+      small('TURTLES DIVE  ·  MIND THE CROCODILE AND THE SNAKE', '#2a6a3a', 346);
+      small('EAT A FLY OR ESCORT THE LADY FROG FOR A BONUS', '#2a6a3a', 372);
       if (hiScore > 0) small(`HI SCORE  ${hiScore}`, '#1a4228', 356);
     }
     if (state === 'gameover') {
@@ -492,7 +718,9 @@
     }
   }
 
-  function drawFrog(x, y, facing) {
+  function drawFrog(x, y, facing, body, limb) {
+    const bodyClr = body || '#2caa60';
+    const limbClr = limb || '#2caa60';
     const cx = x + CELL / 2, cy = y + CELL / 2 + 2;
     let angle = 0;
     if (facing === 'down')  angle = Math.PI;
@@ -504,7 +732,7 @@
     ctx.rotate(angle);
 
     // Back legs
-    ctx.strokeStyle = '#2caa60'; ctx.lineWidth = 4;
+    ctx.strokeStyle = limbClr; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(-8, 7);  ctx.lineTo(-17, 20); ctx.stroke();
     ctx.beginPath(); ctx.moveTo( 8, 7);  ctx.lineTo( 17, 20); ctx.stroke();
     // Front legs
@@ -516,13 +744,13 @@
     ctx.beginPath(); ctx.moveTo( 17, 20); ctx.lineTo( 21, 20); ctx.stroke();
 
     // Body
-    ctx.fillStyle = '#2caa60';
+    ctx.fillStyle = bodyClr;
     ctx.beginPath(); ctx.ellipse(0, 4, 13, 11, 0, 0, Math.PI * 2); ctx.fill();
     // Belly
-    ctx.fillStyle = '#50d880';
+    ctx.fillStyle = body ? '#ffd0e4' : '#50d880';
     ctx.beginPath(); ctx.ellipse(0, 5, 9, 7, 0, 0, Math.PI * 2); ctx.fill();
     // Head
-    ctx.fillStyle = '#2caa60';
+    ctx.fillStyle = bodyClr;
     ctx.beginPath(); ctx.ellipse(0, -8, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
     // Eyes
     ctx.fillStyle = '#fff';
@@ -563,6 +791,7 @@
       particles = particles.filter(p => p.life > 0);
       if (levelClearTimer <= 0) {
         level++;
+        resetHazards();
         goals = new Set();
         timer = TIME_LIMIT;
         initLanes();

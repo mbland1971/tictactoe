@@ -89,6 +89,7 @@
   const HUMAN_COUNT    = 10;
   const SAFE_FALL      = 130;          // longer drops kill the humanoid
   const BAITER_AFTER   = 32;           // seconds before baiters start hunting
+  const BONUS_EVERY    = 10000;        // extra ship AND smart bomb per 10,000
 
   const PTS = {
     lander: 150, mutant: 150, baiter: 200, bomber: 250,
@@ -161,6 +162,7 @@
   let waveTimer, baiterTimer, levelClearTimer, respawnTimer;
   let planetDead = false;
   let flash = 0;
+  let nextBonusAt = BONUS_EVERY;
   let prevTs = 0;
 
   // ── High score storage ─────────────────────────────────────
@@ -192,6 +194,20 @@
     if (score > hiScore) { hiScore = score; saveHiScore(hiScore); }
   }
 
+  // Every point goes through here. The arcade hands out an extra ship and an
+  // extra smart bomb at every 10,000, which is what makes a long run sustainable.
+  function addScore(points) {
+    score += points;
+    while (score >= nextBonusAt) {
+      nextBonusAt += BONUS_EVERY;
+      lives++;
+      bombs++;
+      addFloat(W / 2, PLAY_Y0 + PLAY_H * 0.3, '+1 SHIP  +1 SMART BOMB', '#9ff');
+    }
+    recordHiScore();
+    updateHUD();
+  }
+
   // ── Input ──────────────────────────────────────────────────
   const K = {};
   window.addEventListener('keydown', e => {
@@ -217,6 +233,7 @@
   // ── Setup ──────────────────────────────────────────────────
   function startGame() {
     score = 0; lives = START_LIVES; wave = 1; bombs = START_BOMBS;
+    nextBonusAt = BONUS_EVERY;
     terrain = buildTerrain();
     planetDead = false;
     humans = [];
@@ -290,12 +307,12 @@
       // A lander cut down mid-abduction still drops its captive.
       if (en.carrying) releaseHuman(en);
       en.alive = false; hit++;
-      score += PTS[en.type] || 0;
+      addScore(PTS[en.type] || 0);
       addParticles(sx, en.y, 8, '#9ff');
     }
     mines = mines.filter(m => !onScreen(toScreen(m.x)));
     flash = 0.32;
-    if (hit) { recordHiScore(); updateHUD(); }
+    if (hit) updateHUD();
   }
 
   function hyperspace() {
@@ -374,7 +391,22 @@
   }
 
   // ── Update ─────────────────────────────────────────────────
+  // The laser travels 1000px/s against a 44px-wide hit window, so a single
+  // large step at the dt ceiling could carry it straight past an enemy. The
+  // frame is advanced in fixed slices instead.
+  const MAX_STEP = 0.008;
+
   function update(dt) {
+    const steps = Math.max(1, Math.ceil(dt / MAX_STEP));
+    const sdt = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      stepWorld(sdt);
+      if (state !== 'playing') return;
+    }
+    updateHUD();
+  }
+
+  function stepWorld(dt) {
     waveTimer += dt;
     if (flash > 0) flash = Math.max(0, flash - dt * 2);
 
@@ -402,8 +434,8 @@
       state = 'levelclear';
       const bonus = humans.length * 100 * wave;
       if (bonus > 0) {
-        score += bonus;
         addFloat(W / 2, PLAY_Y0 + PLAY_H * 0.35, `+${bonus}  ${humans.length} SAVED`, '#9f9');
+        addScore(bonus);
       }
       recordHiScore();
       updateHUD();
@@ -445,9 +477,8 @@
         s.carrying = null;
         h.state = 'ground';
         h.y = groundYAt(h.x) - 7;
-        score += PTS.rescue;
         addFloat(toScreen(h.x), h.y - 18, `+${PTS.rescue}`, '#ff9');
-        recordHiScore(); updateHUD();
+        addScore(PTS.rescue);
       }
     }
 
@@ -489,7 +520,6 @@
 
   function hitEnemy(en) {
     en.alive = false;
-    score += PTS[en.type] || 0;
     addParticles(toScreen(en.x), en.y, 9, en.type === 'pod' ? '#ff0' : '#fa6');
     addFloat(toScreen(en.x), en.y - 14, `+${PTS[en.type] || 0}`, '#ffd');
     if (en.carrying) releaseHuman(en);
@@ -497,8 +527,7 @@
       const n = 3 + rndInt(3);
       for (let i = 0; i < n; i++) spawnEnemy('swarmer', en.x, en.y);
     }
-    recordHiScore();
-    updateHUD();
+    addScore(PTS[en.type] || 0);
   }
 
   function updateEnemies(dt) {
@@ -653,9 +682,8 @@
           if (Math.abs(dx) < 18 && Math.abs(dy) < 18) {
             h.state = 'held';
             ship.carrying = h;
-            score += PTS.grab;
             addFloat(toScreen(h.x), h.y - 16, `+${PTS.grab}`, '#ff9');
-            recordHiScore(); updateHUD();
+            addScore(PTS.grab);
             continue;
           }
         }
