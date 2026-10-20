@@ -34,7 +34,8 @@
   </div>
   <canvas id="c" width="480" height="720"></canvas>
   <div id="controls">
-    &larr; &rarr; or A D &mdash; Flippers &nbsp;|&nbsp; SPACE (hold) &mdash; Plunger &nbsp;|&nbsp; P &mdash; Pause
+    &larr; &rarr; or A D &mdash; Flippers &nbsp;|&nbsp; SPACE (hold) &mdash; Plunger &nbsp;|&nbsp;
+    &uarr; or W &mdash; Nudge &nbsp;|&nbsp; P &mdash; Pause
   </div>
 
 <script>
@@ -74,7 +75,27 @@
   const BALL_SAVE  = 7;      // seconds of ball save at the start of each ball
   const PLUNGER_CHARGE = 1.1;
 
+  // Launch speed. The floor matters: the ball has to rise ~400px from the
+  // plunger face to clear the gate at the top of the lane, and with the old
+  // 420 + 900 * power anything under about 0.73 power simply fell back onto
+  // the plunger with no feedback at all. 1100 clears it with margin at zero
+  // power, and 1100 + 150 lands exactly on MAX_SPEED so the whole travel of
+  // the plunger does something.
+  const LAUNCH_MIN  = 1100;
+  const LAUNCH_SPAN = 150;
+
+  // Nudging the table. Three shoves inside the cooldown window tilts it.
+  const TILT_LIMIT = 3;
+  const TILT_COOL  = 2.4;
+  const NUDGE_X    = 95;
+  const NUDGE_Y    = 45;
+
   const PTS = { bumper: 100, sling: 25, target: 500, bank: 5000, rollover: 250, lanes: 1000 };
+
+  // End-of-ball bonus: units accrue while the ball is in play and are paid out
+  // at the drain, multiplied by the bonus multiplier earned on that ball.
+  const BONUS_UNIT = 250;
+  const BONUS_FOR  = { target: 1, rollover: 2, bank: 5, lanes: 4 };
 
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
   const rand  = (a, b) => a + rnd() * (b - a);
@@ -160,6 +181,9 @@
   let balls = [];
   let plungerPower = 0, autoLaunch = 0;
   let ballSaveLeft = 0, bankResetTimer = 0, ballOverTimer = 0, multiballUsed = false;
+  let bonusUnits = 0, bonusPaid = 0;
+  let tiltWarn = 0, tiltCool = 0, tilted = false;
+  let laneIdle = 0;
   let rings = [], floats = [];
   let hiDirty = false, hiSaveTimer = 1.5;
   let prevTs = 0;
@@ -200,6 +224,14 @@
     updateHUD();
   }
 
+  // The end-of-ball bonus already has the multiplier folded in, so it must not
+  // go through addScore() and pick it up a second time.
+  function addRawScore(points) {
+    score += points;
+    if (score > hiScore) { hiScore = score; hiDirty = true; }
+    updateHUD();
+  }
+
   function addRing(x, y, color, r) { rings.push({ x, y, r: r || 10, color, life: 0.4 }); }
   function addFloat(x, y, text, color) { floats.push({ x, y, text, color, life: 1 }); }
 
@@ -217,6 +249,7 @@
     }
     if (repeat) return;
     if (e.code === 'Space' && (state === 'title' || state === 'gameover')) startGame();
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') nudge();
   });
 
   window.addEventListener('keyup', e => {
@@ -310,7 +343,7 @@
   }
 
   function startGame() {
-    score = 0; ballNum = 1; bonusMult = 1;
+    score = 0; ballNum = 1;
     resetBank();
     for (const r of ROLLOVERS) r.lit = false;
     rings = []; floats = [];
@@ -323,8 +356,16 @@
     balls = [newBall()];
     plungerPower = 0;
     autoLaunch = 0;
+    laneIdle = 0;
     ballSaveLeft = BALL_SAVE;
     multiballUsed = false;
+    // Bonus and multiplier are per-ball, as on any real table. These used to
+    // persist for the whole game, which made raiseBonus() a permanent buff and
+    // left the accrued bonus never paid out at all.
+    bonusMult = 1;
+    bonusUnits = 0;
+    bonusPaid = 0;
+    tiltWarn = 0; tiltCool = 0; tilted = false;
     for (const f of flippers) { f.a = f.rest; f.w = 0; }
     updateHUD();
   }
@@ -337,8 +378,9 @@
   function launchBall(power) {
     const b = balls.find(ball => ball.x > 434 && ball.y > 560);
     if (!b) return;
-    b.vy = -(420 + 900 * clamp(power, 0, 1));
+    b.vy = -(LAUNCH_MIN + LAUNCH_SPAN * clamp(power, 0, 1));
     b.vx = rand(-14, 14);
+    laneIdle = 0;
   }
 
   function loseBall() {
@@ -353,10 +395,40 @@
     state = 'playing';
   }
 
+  // Collected when the ball drains — unless the table was tilted, which forfeits
+  // it, as it should.
+  function collectBonus() {
+    bonusPaid = tilted ? 0 : bonusUnits * BONUS_UNIT * bonusMult;
+    if (bonusPaid > 0) addRawScore(bonusPaid);
+    return bonusPaid;
+  }
+
   function persistHiScore() {
     if (!hiDirty) return;
     saveHiScore(hiScore);
     hiDirty = false;
+  }
+
+  // ── Nudge / tilt ───────────────────────────────────────────
+  function nudge() {
+    if (state !== 'playing' || tilted || !balls.length) return;
+    tiltWarn++;
+    tiltCool = TILT_COOL;
+    if (tiltWarn > TILT_LIMIT) { tilt(); return; }
+    for (const b of balls) {
+      b.vx += rand(-NUDGE_X, NUDGE_X);
+      b.vy -= NUDGE_Y;
+    }
+    addFloat(240, 470, tiltWarn === TILT_LIMIT ? 'TILT WARNING' : 'NUDGE',
+             tiltWarn === TILT_LIMIT ? '#ffd23d' : '#7dff9d');
+  }
+
+  // Tilting kills the flippers and forfeits the bonus; the ball is on its way
+  // out and there is nothing left to do about it.
+  function tilt() {
+    tilted = true;
+    ballSaveLeft = 0;
+    addFloat(240, 430, 'TILT', '#ff3355');
   }
 
   // ── Scoring events ─────────────────────────────────────────
@@ -381,12 +453,14 @@
   function onTarget(t, b) {
     t.down = true;
     t.flash = 0.35;
+    bonusUnits += BONUS_FOR.target;
     addScore(PTS.target);
     addFloat(t.side < 0 ? 70 : 380, (t.y1 + t.y2) / 2, String(PTS.target * bonusMult), '#4dc8ff');
     if (TARGETS.every(x => x.down)) onBankComplete(b);
   }
 
   function onBankComplete(b) {
+    bonusUnits += BONUS_FOR.bank;
     addScore(PTS.bank);
     addFloat(222, 400, 'BANK CLEARED', '#ffd23d');
     raiseBonus();
@@ -403,9 +477,11 @@
 
   function onRollover(ro) {
     ro.lit = true;
+    bonusUnits += BONUS_FOR.rollover;
     addScore(PTS.rollover);
     addRing(ro.x, ro.y, '#7dff9d', 12);
     if (ROLLOVERS.every(r => r.lit)) {
+      bonusUnits += BONUS_FOR.lanes;
       addScore(PTS.lanes);
       for (const r of ROLLOVERS) r.lit = false;
       raiseBonus();
@@ -432,7 +508,7 @@
   function step(dt) {
     for (let i = 0; i < flippers.length; i++) {
       const f = flippers[i];
-      f.held = state === 'playing' && flipperHeld(i === 0 ? -1 : 1);
+      f.held = state === 'playing' && !tilted && flipperHeld(i === 0 ? -1 : 1);
       const target = f.held ? f.up : f.rest;
       const prev = f.a;
       f.a += clamp(target - f.a, -FLIP_SPEED * dt, FLIP_SPEED * dt);
@@ -493,12 +569,30 @@
       addFloat(222, 500, 'BALL SAVED', '#7dff9d');
       return;
     }
+    collectBonus();
     state = 'ballover';
-    ballOverTimer = 1.4;
+    ballOverTimer = 1.8;
   }
 
   function updateTimers(dt) {
     if (ballSaveLeft > 0) ballSaveLeft = Math.max(0, ballSaveLeft - dt);
+
+    // Tilt warnings fade if you keep your hands off the table.
+    if (tiltCool > 0) {
+      tiltCool -= dt;
+      if (tiltCool <= 0 && tiltWarn > 0) { tiltWarn--; tiltCool = tiltWarn > 0 ? TILT_COOL : 0; }
+    }
+
+    // Belt and braces for the plunger: if a ball is sitting in the lane going
+    // nowhere and the player is not holding the plunger, send it up anyway.
+    const stuck = balls.length === 1 && balls[0].x > 434 && balls[0].y > 600
+                  && Math.abs(balls[0].vy) < 25 && !K.Space && autoLaunch <= 0;
+    if (stuck) {
+      laneIdle += dt;
+      if (laneIdle > 0.9) { launchBall(0.75); }
+    } else if (!stuck) {
+      laneIdle = 0;
+    }
 
     if (bankResetTimer > 0) {
       bankResetTimer -= dt;
@@ -838,13 +932,32 @@
   }
 
   function drawScreens() {
+    // Live readouts: the bonus riding on this ball, and the tilt state.
+    if (state === 'playing' || state === 'paused') {
+      ctx.font = '12px "Trebuchet MS", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#8893a7';
+      ctx.fillText(`BONUS ${bonusUnits * BONUS_UNIT * bonusMult}`, 16, 712);
+      if (tilted) {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ff3355';
+        ctx.fillText('TILT', 464, 712);
+      } else if (tiltWarn >= TILT_LIMIT) {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ffd23d';
+        ctx.fillText('TILT WARNING', 464, 712);
+      }
+      ctx.textAlign = 'center';
+    }
+
     if (state === 'title') {
       overlay(0.72);
       big('PINBALL', '#ff3355', 250);
       small('HOLD SPACE TO PULL THE PLUNGER, RELEASE TO LAUNCH', '#c9d4e6', 300);
       small('ARROWS OR A / D WORK THE FLIPPERS', '#c9d4e6', 328);
       small('DROP ALL SIX TARGETS FOR MULTIBALL', '#4dc8ff', 356);
-      small('PRESS SPACE TO START', '#ffd23d', 410);
+      small('UP OR W NUDGES THE TABLE — THREE SHOVES AND IT TILTS', '#c9d4e6', 382);
+      small('PRESS SPACE TO START', '#ffd23d', 412);
     } else if (state === 'paused') {
       overlay(0.6);
       big('PAUSED', '#ffd23d', 330);
@@ -852,6 +965,13 @@
     } else if (state === 'ballover') {
       overlay(0.45);
       big('BALL ' + ballNum + ' LOST', '#ff3355', 340);
+      if (tilted) {
+        small('TILT — BONUS FORFEITED', '#ff3355', 384);
+      } else if (bonusPaid > 0) {
+        small(`BONUS  ${bonusUnits} × ${BONUS_UNIT} × ${bonusMult}X  =  ${bonusPaid}`, '#ffd23d', 384);
+      } else {
+        small('NO BONUS COLLECTED', '#8893a7', 384);
+      }
     } else if (state === 'gameover') {
       overlay(0.75);
       big('GAME OVER', '#ff3355', 300);
