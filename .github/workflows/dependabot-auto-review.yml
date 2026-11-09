@@ -7,7 +7,10 @@ permissions: {}
 
 jobs:
   automerge:
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    # Check the PR's author, not github.actor: actor is whoever triggered this
+    # particular run, so a human PR that Dependabot merely re-ran or rebased
+    # would otherwise pass as a Dependabot PR and be auto-merged.
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
